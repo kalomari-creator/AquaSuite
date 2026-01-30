@@ -1,9 +1,14 @@
-node_modules
 .env
+node_modules
 dist
 build
+.dart_tool
 .flutter-plugins
 .flutter-plugins-dependencies
-.dart_tool
-*.log
 coverage
+*.log
+
+# secrets
+cloudflared
+*.pem
+*.json
