@@ -1,19 +1,5 @@
 .env
-node_modules
-dist
-build
-.dart_tool
-.flutter-plugins
-.flutter-plugins-dependencies
-coverage
-*.log
-
-# secrets
-cloudflared
-*.pem
-*.json
-
-# Local secrets & build artifacts
-.env
 node_modules/
 uploads/
+*.log
+.DS_Store
