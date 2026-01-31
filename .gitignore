@@ -12,3 +12,8 @@ coverage
 cloudflared
 *.pem
 *.json
+
+# Local secrets & build artifacts
+.env
+node_modules/
+uploads/
