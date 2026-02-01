@@ -250,17 +250,18 @@ function setRosterMode(mode) {
 }
 
 async function loadLocations() {
-  const data = await apiFetch('/locations')
-  state.locations = data.locations || []
-  locationSelect.innerHTML = ''
-  state.locations.forEach((loc) => {
-    const opt = document.createElement('option')
+  const data = await apiFetch("/locations")
+  const locations = Array.isArray(data.locations) ? data.locations : []
+  state.locations = locations
+  locationSelect.innerHTML = ""
+  locations.forEach((loc) => {
+    const opt = document.createElement("option")
     opt.value = loc.id
     opt.textContent = loc.name
     locationSelect.appendChild(opt)
   })
-  state.locationId = state.locations[0]?.id || null
-  locationSelect.value = state.locationId || ''
+  state.locationId = locations[0]?.id || null
+  locationSelect.value = state.locationId || ""
   applyLocationFeatures()
 }
 
@@ -320,7 +321,8 @@ async function loadRosterEntries() {
 }
 
 function buildTimeBlocks() {
-  const times = [...new Set(state.rosterEntries.map((r) => r.start_time))]
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+  const times = [...new Set(rosterEntries.map((r) => r.start_time))]
   times.sort()
   if (!state.selectedBlock || !times.includes(state.selectedBlock)) {
     state.selectedBlock = times[0] || null
@@ -346,7 +348,8 @@ function buildTimeBlocks() {
 
 function buildInstructorFilter() {
   const instructors = new Set()
-  state.rosterEntries.forEach((r) => {
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+  rosterEntries.forEach((r) => {
     if (r.actual_instructor) instructors.add(r.actual_instructor)
     else if (r.scheduled_instructor) instructors.add(r.scheduled_instructor)
     else if (r.instructor_name) instructors.add(r.instructor_name)
@@ -367,9 +370,9 @@ function buildInstructorFilter() {
 }
 
 function applyFilters() {
-  const search = state.search.toLowerCase()
+  const search = (state.search || "").toLowerCase()
   const selected = state.selectedBlock
-  let filtered = state.rosterEntries
+  let filtered = Array.isArray(state.rosterEntries) ? state.rosterEntries.slice() : []
 
   if (selected) {
     filtered = filtered.filter((r) => r.start_time === selected)
@@ -662,7 +665,8 @@ function renderRoster() {
 
 
 async function updateAttendance(rosterEntryId, attendance) {
-  const entry = state.rosterEntries.find((r) => r.id === rosterEntryId)
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+    const entry = rosterEntries.find((r) => r.id === rosterEntryId)
   if (entry?.local_only) {
     entry.attendance = attendance
     applyFilters()
@@ -692,7 +696,8 @@ async function bulkAttendance(attendance) {
         attendance
       })
     })
-    state.rosterEntries.forEach((entry) => {
+    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+    rosterEntries.forEach((entry) => {
       if (entry.start_time === state.selectedBlock) entry.attendance = attendance
     })
     applyFilters()
@@ -883,7 +888,8 @@ function addLocalSwimmer() {
 
 function renderReports() {
   const counts = new Map()
-  state.rosterEntries.forEach((entry) => {
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+  rosterEntries.forEach((entry) => {
     const name = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || 'Unassigned'
     counts.set(name, (counts.get(name) || 0) + 1)
   })
@@ -921,7 +927,8 @@ async function loadStaff() {
 
 function renderStaffList() {
   const query = (staffSearch.value || '').toLowerCase()
-  const items = state.staff.filter((s) => {
+  const staff = Array.isArray(state.staff) ? state.staff : []
+  const items = staff.filter((s) => {
     const hay = `${s.first_name} ${s.last_name} ${s.email} ${s.phone || ''}`.toLowerCase()
     return hay.includes(query)
   })
@@ -949,7 +956,8 @@ async function loadInstructorVariants() {
     empty.value = ''
     empty.textContent = 'Select staff'
     select.appendChild(empty)
-    state.staff.forEach((s) => {
+    const staff = Array.isArray(state.staff) ? state.staff : []
+    staff.forEach((s) => {
       const opt = document.createElement('option')
       opt.value = s.id
       opt.textContent = `${s.first_name} ${s.last_name}`
