@@ -1,0 +1,30 @@
+{
+  "name": "aquasuite-api",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "db:up": "dotenv -e .env -- dbmate up",
+    "db:new": "dotenv -e .env -- dbmate new"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.0",
+    "@fastify/multipart": "^8.2.0",
+    "@fastify/websocket": "^8.0.0",
+    "bcrypt": "^6.0.0",
+    "cheerio": "^1.2.0",
+    "dotenv": "^16.0.0",
+    "fastify": "^4.0.0",
+    "nanoid": "^5.1.6",
+    "pg": "^8.11.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "dotenv-cli": "^7.4.4",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}
