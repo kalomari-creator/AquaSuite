@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AquaSuite V1</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">AquaSuite</div>
+        <div class="user-info" id="userInfo"></div>
+        <button class="btn btn-outline" id="logoutBtn">Log out</button>
+      </header>
+
+      <main class="container">
+        <section id="loginView" class="card">
+          <h1>Sign in</h1>
+          <p class="muted">Use your username and 4-digit PIN.</p>
+          <form id="loginForm">
+            <label>
+              Username
+              <input type="text" id="username" autocomplete="username" required />
+            </label>
+            <label>
+              PIN
+              <input type="password" id="pin" inputmode="numeric" maxlength="4" required />
+            </label>
+            <button class="btn" type="submit">Log in</button>
+            <div class="error" id="loginError"></div>
+          </form>
+        </section>
+
+        <section id="appView" class="hidden">
+          <div class="toolbar">
+            <div>
+              <label>
+                Location
+                <select id="locationSelect"></select>
+              </label>
+            </div>
+            <div>
+              <label>
+                Date
+                <input type="date" id="dateSelect" />
+              </label>
+            </div>
+            <div class="toggle-group">
+              <button class="btn btn-outline" id="myScheduleBtn">My Schedule</button>
+              <button class="btn btn-outline" id="fullRosterBtn">Full Roster</button>
+            </div>
+          </div>
+
+          <nav class="tabs">
+            <button class="tab active" data-view="schedule">Schedule</button>
+            <button class="tab" data-view="uploads">Uploads</button>
+            <button class="tab" data-view="reports">Reports</button>
+          </nav>
+
+          <section id="scheduleView" class="card">
+            <h2>Schedule</h2>
+            <div id="scheduleList" class="list"></div>
+          </section>
+
+          <section id="uploadsView" class="card hidden">
+            <h2>Upload Roll Sheet</h2>
+            <form id="uploadForm">
+              <input type="file" id="rosterFile" accept=".html,.htm" required />
+              <button class="btn" type="submit">Upload</button>
+            </form>
+            <div id="uploadStatus" class="status"></div>
+            <h3>Recent uploads</h3>
+            <div id="uploadList" class="list"></div>
+          </section>
+
+          <section id="reportsView" class="card hidden">
+            <h2>Reports (V1)</h2>
+            <div id="reportSummary" class="list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
