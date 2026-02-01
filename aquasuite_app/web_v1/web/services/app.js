@@ -415,12 +415,13 @@ function setObsTab(tab) {
 }
 
 function renderObservationSwimmers() {
+  const swimmers = Array.isArray(state.observationSwimmers) ? state.observationSwimmers : []
   obsSwimmerList.innerHTML = ''
-  if (!state.observationSwimmers.length) {
+  if (!swimmers.length) {
     obsSwimmerList.innerHTML = '<div class="hint">No swimmers yet. Add manually or load roster.</div>'
     return
   }
-  state.observationSwimmers.forEach((swimmer, idx) => {
+  swimmers.forEach((swimmer, idx) => {
     const item = document.createElement('div')
     item.className = 'list-item'
     item.innerHTML = `<strong>${swimmer.name}</strong>`
@@ -472,7 +473,7 @@ async function loadObservationClasses() {
   obsRosterStatus.textContent = 'Loading roster classes…'
   try {
     const data = await apiFetch(`/class-instances?locationId=${state.locationId}&date=${dateVal}`)
-    state.observationRoster = data.classes || []
+    state.observationRoster = Array.isArray(data.classes) ? data.classes : []
     obsClassSelect.innerHTML = ''
     const defaultOpt = document.createElement('option')
     defaultOpt.value = ''
@@ -500,7 +501,8 @@ async function loadObservationSwimmersFromRoster() {
     obsRosterStatus.textContent = 'Select a class first.'
     return
   }
-  const cls = state.observationRoster.find((c) => c.id === classId)
+  const roster = Array.isArray(state.observationRoster) ? state.observationRoster : []
+  const cls = roster.find((c) => c.id === classId)
   if (!cls) return
 
   try {
@@ -549,12 +551,13 @@ async function loadObservationDashboard() {
   if (!state.locationId) return
   try {
     const data = await apiFetch(`/observations?locationId=${state.locationId}`)
+    const observations = Array.isArray(data.observations) ? data.observations : []
     obsDashboardList.innerHTML = ''
-    if (!data.observations || !data.observations.length) {
+    if (!observations.length) {
       obsDashboardList.innerHTML = '<div class="hint">No observations yet.</div>'
       return
     }
-    data.observations.forEach((obs) => {
+    observations.forEach((obs) => {
       const item = document.createElement('div')
       item.className = 'list-item'
       item.innerHTML = `<strong>${obs.instructor_name || 'Instructor'}</strong>
@@ -789,12 +792,13 @@ async function loadRetentionAnalytics() {
 }
 
 function renderRetention(summary) {
+  const rows = Array.isArray(summary) ? summary : []
   retentionTable.innerHTML = ''
-  if (!summary.length) {
+  if (!rows.length) {
     retentionTable.innerHTML = '<div class="hint">No retention data yet.</div>'
     return
   }
-  summary.forEach((item) => {
+  rows.forEach((item) => {
     const latest = item.latest || {}
     const row = document.createElement('div')
     row.className = 'list-item'
@@ -1048,8 +1052,9 @@ async function loadGmailStatus() {
 }
 
 function renderLocationAdmin() {
+  const locations = Array.isArray(state.locations) ? state.locations : []
   locationAdminList.innerHTML = ''
-  state.locations.forEach((loc) => {
+  locations.forEach((loc) => {
     const item = document.createElement('div')
     item.className = 'list-item'
 
