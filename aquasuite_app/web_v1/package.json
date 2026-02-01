@@ -1,0 +1,13 @@
+{
+  "name": "aquasuite-web-v1",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "vite --config vite.config.js",
+    "build": "node scripts/prebuild.js && vite build --config vite.config.js",
+    "preview": "vite preview --host 127.0.0.1 --port 5174"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
