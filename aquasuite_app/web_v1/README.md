@@ -1,29 +1,29 @@
-# AquaSuite Web V1 (Static)
+# AquaSuite Web V1
 
-## How auth works in the browser
+## Where it lives
+- Source: `aquasuite_app/web_v1/`
+- Deployed: `/var/www/aquasuite`
+
+## Auth
 - Login via `/api/auth/login`
-- Token stored in `localStorage` as `aqua_token`
-- All API calls use `Authorization: Bearer <token>`
+- Token stored in `localStorage` (`aqua_token`)
 
-## Endpoints used
-- `POST /api/auth/login`
+## API endpoints used
 - `GET /api/locations`
-- `GET /api/class-instances`
-- `GET /api/class-instances/mine`
+- `GET /api/roster-entries`
+- `GET /api/roster-entries/mine`
 - `POST /api/uploads/roster`
+- `POST /api/attendance`
+- `POST /api/attendance/bulk`
 - `GET /api/roster-uploads`
 
-## Role-based view logic
-- UI defaults to “My Schedule” when role key is `staff`
-- Users can toggle to “Full Roster” at any time
+## Role behavior
+- Default view is “My Schedule” for role key `staff`
+- Users can toggle to “Full Roster”
 
-## Where to add pages
-- Add new sections in `app.js` and new `<section>` blocks in `index.html`
-- Keep `/api` path prefix for all calls
-
-## Manual test checklist
-1) Log in with admin user
-2) Select location and date
-3) Upload HTML roll sheet
-4) Verify schedule list shows classes
-5) Toggle My Schedule vs Full Roster
+## Manual test
+1) Login
+2) Select location/date
+3) Upload roll sheet
+4) Select time block
+5) Mark attendance

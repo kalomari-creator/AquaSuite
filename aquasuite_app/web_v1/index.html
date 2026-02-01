@@ -1,87 +1,157 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AquaSuite V1</title>
-    <link rel="stylesheet" href="/styles.css" />
-  </head>
-  <body>
-    <div id="app">
-      <header class="topbar">
-        <div class="brand">AquaSuite</div>
-        <div class="user-info" id="userInfo"></div>
-        <button class="btn btn-outline" id="logoutBtn">Log out</button>
-      </header>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AquaSuite Roster</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div id="loginPanel" class="card">
+      <h1>AquaSuite</h1>
+      <p class="muted">Sign in with your username and PIN.</p>
+      <form id="loginForm" class="grid2">
+        <label>
+          Username
+          <input type="text" id="username" autocomplete="username" required />
+        </label>
+        <label>
+          PIN
+          <input type="password" id="pin" inputmode="numeric" maxlength="4" required />
+        </label>
+        <button class="primary" type="submit">Log in</button>
+        <div class="error" id="loginError"></div>
+      </form>
+    </div>
 
-      <main class="container">
-        <section id="loginView" class="card">
-          <h1>Sign in</h1>
-          <p class="muted">Use your username and 4-digit PIN.</p>
-          <form id="loginForm">
-            <label>
-              Username
-              <input type="text" id="username" autocomplete="username" required />
-            </label>
-            <label>
-              PIN
-              <input type="password" id="pin" inputmode="numeric" maxlength="4" required />
-            </label>
-            <button class="btn" type="submit">Log in</button>
-            <div class="error" id="loginError"></div>
-          </form>
-        </section>
+    <div id="appPanel" class="hidden">
+      <div class="topbar">
+        <div>
+          <h1>AquaSuite</h1>
+          <div class="muted tiny" id="locationHint">Roster + Announcer</div>
+        </div>
 
-        <section id="appView" class="hidden">
-          <div class="toolbar">
-            <div>
-              <label>
-                Location
-                <select id="locationSelect"></select>
-              </label>
+        <div class="row">
+          <label class="tiny">Location
+            <select id="locationSelect"></select>
+          </label>
+          <label class="tiny">Date
+            <input id="dateSelect" type="date" class="dateInput" />
+          </label>
+        </div>
+
+        <div class="tabs" id="scheduleToggle">
+          <button class="tab active" data-mode="mine">My Schedule</button>
+          <button class="tab" data-mode="all">Full Roster</button>
+        </div>
+
+        <div class="spacer"></div>
+        <div class="pill" id="userInfo"></div>
+        <button class="secondary" id="logoutBtn">Log out</button>
+      </div>
+
+      <div class="tabs page-tabs">
+        <button class="tab active" data-view="roster">Roster</button>
+        <button class="tab" data-view="uploads">Uploads</button>
+        <button class="tab" data-view="reports">Reports</button>
+      </div>
+
+      <section id="viewRoster">
+        <div class="card">
+          <div class="row">
+            <div class="pill">Time Blocks <span class="muted">(Date:</span> <span id="timeBlockDate"></span><span class="muted">)</span></div>
+            <div class="spacer"></div>
+            <div class="pill">Selected: <strong id="selectedBlock">None</strong></div>
+          </div>
+          <div class="blocks" id="timeBlocks"></div>
+        </div>
+
+        <div class="card">
+          <div class="row rosterToolbar">
+            <div class="pill">Roster <span id="rosterMeta" class="muted"></span></div>
+            <div class="legend" id="tagLegend">
+              <span class="legendItem"><span class="flagBadge on">⭐</span><span class="legendText">First time</span></span>
+              <span class="legendItem"><span class="flagBadge on">🔄</span><span class="legendText">Makeup</span></span>
+              <span class="legendItem"><span class="flagBadge on">📜</span><span class="legendText">Policy</span></span>
+              <span class="legendItem"><span class="flagBadge on">💳</span><span class="legendText">Balance</span></span>
+              <span class="legendItem"><span class="flagBadge on">🧪</span><span class="legendText">Trial</span></span>
             </div>
-            <div>
-              <label>
-                Date
-                <input type="date" id="dateSelect" />
-              </label>
+
+            <div class="spacer"></div>
+
+            <div class="searchWrap">
+              <input type="text" id="rosterSearch" class="searchInput" placeholder="Search roster..." />
+              <button class="searchClear hidden" id="searchClear" title="Clear search">✕</button>
             </div>
-            <div class="toggle-group">
-              <button class="btn btn-outline" id="myScheduleBtn">My Schedule</button>
-              <button class="btn btn-outline" id="fullRosterBtn">Full Roster</button>
+
+            <span class="pill">Sort</span>
+            <select id="sortBy">
+              <option value="instructor" selected>Instructor + A-Z</option>
+              <option value="name">Swimmer A-Z</option>
+            </select>
+
+            <span class="pill">Instructor</span>
+            <select id="instructorFilter"></select>
+
+            <div id="bulkAttendanceActions" class="row" style="gap:6px;">
+              <button class="secondary miniBtn" id="bulkMarkPresent">✅ Mark all present</button>
+              <button class="secondary miniBtn" id="bulkClearAttendance">⭘ Clear all attendance</button>
             </div>
           </div>
 
-          <nav class="tabs">
-            <button class="tab active" data-view="schedule">Schedule</button>
-            <button class="tab" data-view="uploads">Uploads</button>
-            <button class="tab" data-view="reports">Reports</button>
-          </nav>
+          <table class="roster-table">
+            <thead>
+              <tr>
+                <th style="width:120px;">Attendance</th>
+                <th>Swimmer</th>
+                <th style="width:70px;">Age</th>
+                <th style="width:140px;">Type/Program</th>
+                <th style="width:120px;">Level</th>
+                <th style="width:160px;">Instructor</th>
+                <th style="width:90px;">Zone</th>
+              </tr>
+            </thead>
+            <tbody id="rosterTable"></tbody>
+          </table>
 
-          <section id="scheduleView" class="card">
-            <h2>Schedule</h2>
-            <div id="scheduleList" class="list"></div>
-          </section>
+          <div id="rosterEmpty" class="hint muted">Select a date to load roster.</div>
+        </div>
+      </section>
 
-          <section id="uploadsView" class="card hidden">
-            <h2>Upload Roll Sheet</h2>
-            <form id="uploadForm">
-              <input type="file" id="rosterFile" accept=".html,.htm" required />
-              <button class="btn" type="submit">Upload</button>
-            </form>
-            <div id="uploadStatus" class="status"></div>
-            <h3>Recent uploads</h3>
-            <div id="uploadList" class="list"></div>
-          </section>
+      <section id="viewUploads" class="hidden">
+        <div class="card">
+          <div class="row">
+            <div>
+              <h3>Upload Roll Sheet</h3>
+              <p class="muted tiny">Upload iClassPro condensed HTML roll sheet.</p>
+            </div>
+          </div>
+          <form id="uploadForm" class="row" style="margin-top:8px;">
+            <input type="file" id="rosterFile" accept=".html,.htm" />
+            <button class="primary" type="submit">Upload</button>
+          </form>
+          <div class="hint" id="uploadStatus"></div>
+        </div>
+        <div class="card">
+          <div class="row">
+            <div class="pill">Recent uploads</div>
+          </div>
+          <div id="uploadList" class="list"></div>
+        </div>
+      </section>
 
-          <section id="reportsView" class="card hidden">
-            <h2>Reports (V1)</h2>
-            <div id="reportSummary" class="list"></div>
-          </section>
-        </section>
-      </main>
+      <section id="viewReports" class="hidden">
+        <div class="card">
+          <div class="row">
+            <div class="pill">V1 Summary</div>
+          </div>
+          <div id="reportList" class="list"></div>
+        </div>
+      </section>
     </div>
+  </div>
 
-    <script src="/app.js"></script>
-  </body>
+  <script src="/app.js"></script>
+</body>
 </html>
