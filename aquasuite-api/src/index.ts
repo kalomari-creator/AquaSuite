@@ -10,6 +10,7 @@ import bcrypt from 'bcrypt'
 import crypto from 'crypto'
 import { nanoid } from 'nanoid'
 import { parseIclassproRollsheet } from './roster/parseRollsheet.js'
+import { parseIclassproRosterEntries } from './roster/parseRosterEntries.js'
 
 dotenv.config()
 
@@ -267,12 +268,16 @@ app.post('/uploads/roster', async (req, reply) => {
   const dateParam = (req.query as any)?.date as string | undefined
   const fallbackDate = dateParam || new Date().toISOString().slice(0, 10)
 
+  const rosterParsed = parseIclassproRosterEntries(html)
+
   const summary = {
     totalParsed: parsed.classes.length,
     inserted: 0,
     skippedNoTime: 0,
     skippedNoDate: 0,
-    skippedNoName: 0
+    skippedNoName: 0,
+    swimmersParsed: rosterParsed.entries.length,
+    swimmersInserted: 0
   }
 
   const client = await pool.connect()
@@ -313,6 +318,70 @@ app.post('/uploads/roster', async (req, reply) => {
       summary.inserted += 1
     }
 
+    if (rosterParsed.entries.length) {
+      for (const entry of rosterParsed.entries) {
+        if (!entry.startTime || !entry.swimmerName) continue
+        const classDate = entry.classDate || fallbackDate
+        if (!classDate) continue
+
+        await client.query(
+          `INSERT INTO roster_entries
+            (location_id, upload_id, class_date, start_time, class_name, swimmer_name, age_text, program, level,
+             instructor_name, scheduled_instructor, actual_instructor, is_sub, zone,
+             attendance, attendance_auto_absent, attendance_at, attendance_marked_by_user_id,
+             flag_first_time, flag_makeup, flag_policy, flag_owes, flag_trial, balance_amount)
+           VALUES
+            ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+           ON CONFLICT (location_id, class_date, start_time, swimmer_name) DO UPDATE SET
+             class_name=excluded.class_name,
+             age_text=excluded.age_text,
+             program=excluded.program,
+             level=excluded.level,
+             instructor_name=excluded.instructor_name,
+             scheduled_instructor=excluded.scheduled_instructor,
+             actual_instructor=excluded.actual_instructor,
+             is_sub=excluded.is_sub,
+             zone=excluded.zone,
+             attendance=COALESCE(excluded.attendance, roster_entries.attendance),
+             attendance_auto_absent=(roster_entries.attendance_auto_absent OR excluded.attendance_auto_absent),
+             flag_first_time=excluded.flag_first_time,
+             flag_makeup=excluded.flag_makeup,
+             flag_policy=excluded.flag_policy,
+             flag_owes=excluded.flag_owes,
+             flag_trial=excluded.flag_trial,
+             balance_amount=excluded.balance_amount,
+             updated_at=now()`,
+          [
+            locationId,
+            uploadId,
+            classDate,
+            entry.startTime,
+            entry.className || null,
+            entry.swimmerName,
+            entry.ageText || null,
+            entry.program || null,
+            entry.level || null,
+            entry.instructorName || null,
+            entry.scheduledInstructor || null,
+            entry.actualInstructor || null,
+            entry.isSub,
+            entry.zone ?? null,
+            entry.attendance ?? null,
+            entry.attendanceAutoAbsent,
+            entry.attendance === 0 || entry.attendance === 1 ? new Date() : null,
+            entry.attendance === 0 || entry.attendance === 1 ? sess.user_id : null,
+            entry.flagFirstTime,
+            entry.flagMakeup,
+            entry.flagPolicy,
+            entry.flagOwes,
+            entry.flagTrial,
+            entry.balanceAmount ?? null
+          ]
+        )
+        summary.swimmersInserted += 1
+      }
+    }
+
     await client.query(
       `UPDATE roster_uploads SET parse_status='ok', parsed_at=now() WHERE id=$1`,
       [uploadId]
@@ -335,6 +404,7 @@ app.post('/uploads/roster', async (req, reply) => {
     uploadId,
     storedPath,
     classesInserted: summary.inserted,
+    swimmersInserted: summary.swimmersInserted,
     parseSummary: summary
   })
 })
@@ -394,6 +464,136 @@ app.get('/class-instances/mine', async (req, reply) => {
   )
 
   return { classes: res.rows }
+})
+
+app.get('/roster-entries', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const date = (req.query as any)?.date as string | undefined
+  const startTime = (req.query as any)?.start_time as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const params = [locationId, date]
+  let filter = ''
+  if (startTime) {
+    params.push(startTime)
+    filter = ' AND start_time = $3'
+  }
+
+  const res = await pool.query(
+    `SELECT id, class_date, start_time, class_name, swimmer_name, age_text, program, level,
+            instructor_name, scheduled_instructor, actual_instructor, is_sub, zone,
+            attendance, attendance_auto_absent, flag_first_time, flag_makeup, flag_policy, flag_owes, flag_trial,
+            balance_amount
+     FROM roster_entries
+     WHERE location_id=$1 AND class_date=$2${filter}
+     ORDER BY start_time ASC, instructor_name ASC, swimmer_name ASC`,
+    params
+  )
+
+  return { entries: res.rows }
+})
+
+app.get('/roster-entries/mine', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const date = (req.query as any)?.date as string | undefined
+  const startTime = (req.query as any)?.start_time as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const u = await pool.query(
+    `SELECT first_name, last_name FROM users WHERE id=$1`,
+    [sess.user_id]
+  )
+  if (u.rowCount === 0) return reply.code(404).send({ error: 'user_not_found' })
+
+  const first = (u.rows[0].first_name || '').trim()
+  const last = (u.rows[0].last_name || '').trim()
+  const forms = [
+    `${last}, ${first}`,
+    `${first} ${last}`,
+    `${first} ${last}`.trim()
+  ].filter(Boolean)
+
+  const params: any[] = [locationId, date, forms]
+  let filter = ''
+  if (startTime) {
+    params.push(startTime)
+    filter = ' AND start_time = $4'
+  }
+
+  const res = await pool.query(
+    `SELECT id, class_date, start_time, class_name, swimmer_name, age_text, program, level,
+            instructor_name, scheduled_instructor, actual_instructor, is_sub, zone,
+            attendance, attendance_auto_absent, flag_first_time, flag_makeup, flag_policy, flag_owes, flag_trial,
+            balance_amount
+     FROM roster_entries
+     WHERE location_id=$1 AND class_date=$2${filter}
+       AND (scheduled_instructor = ANY($3::text[]) OR actual_instructor = ANY($3::text[]) OR instructor_name = ANY($3::text[]))
+     ORDER BY start_time ASC, instructor_name ASC, swimmer_name ASC`,
+    params
+  )
+
+  return { entries: res.rows }
+})
+
+app.post('/attendance', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const body = req.body as { rosterEntryId?: string; attendance?: number | null }
+  const rosterEntryId = body.rosterEntryId
+  if (!rosterEntryId) return reply.code(400).send({ error: 'rosterEntryId_required' })
+
+  const entry = await pool.query(
+    `SELECT id, location_id FROM roster_entries WHERE id=$1`,
+    [rosterEntryId]
+  )
+  if (entry.rowCount === 0) return reply.code(404).send({ error: 'roster_entry_not_found' })
+
+  const locationId = entry.rows[0].location_id
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const att = body.attendance === 0 ? 0 : body.attendance === 1 ? 1 : null
+  const attendanceAt = att === 0 || att === 1 ? new Date() : null
+
+  await pool.query(
+    `UPDATE roster_entries
+     SET attendance=$1, attendance_at=$2, attendance_marked_by_user_id=$3
+     WHERE id=$4`,
+    [att, attendanceAt, att === null ? null : sess.user_id, rosterEntryId]
+  )
+
+  return { ok: true, attendance: att }
+})
+
+app.post('/attendance/bulk', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const body = req.body as { locationId?: string; date?: string; start_time?: string; attendance?: number | null }
+  const locationId = body.locationId
+  const date = body.date
+  const startTime = body.start_time
+  if (!locationId || !date || !startTime) return reply.code(400).send({ error: 'locationId_date_start_time_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const att = body.attendance === 0 ? 0 : body.attendance === 1 ? 1 : null
+  const attendanceAt = att === 0 || att === 1 ? new Date() : null
+
+  const res = await pool.query(
+    `UPDATE roster_entries
+     SET attendance=$1, attendance_at=$2, attendance_marked_by_user_id=$3
+     WHERE location_id=$4 AND class_date=$5 AND start_time=$6`,
+    [att, attendanceAt, att === null ? null : sess.user_id, locationId, date, startTime]
+  )
+
+  return { ok: true, updated: res.rowCount }
 })
 
 app.get('/roster-uploads', async (req, reply) => {

@@ -1,4 +1,4 @@
-\restrict s4S2WnHVyU1c9XwNoxoScg44CI3Nt99dzc4iaggJVTMf2KThXgN8P5D2vXKldeP
+\restrict DEM3lguJodUtHTigDSfoW9kze0zCl9HioZgOrnMnueSIdMy7yVIyQyYhz6r43d0
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
@@ -171,7 +171,7 @@ CREATE TABLE public.roles (
 
 CREATE TABLE public.roster_entries (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
-    roster_id uuid NOT NULL,
+    roster_id uuid,
     class_time timestamp with time zone,
     class_name text,
     instructor_name text,
@@ -181,7 +181,28 @@ CREATE TABLE public.roster_entries (
     swimmer_external_id text,
     customer_external_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    location_id uuid,
+    upload_id uuid,
+    class_date date,
+    start_time time without time zone,
+    age_text text,
+    program text,
+    level text,
+    scheduled_instructor text,
+    actual_instructor text,
+    is_sub boolean DEFAULT false NOT NULL,
+    zone integer,
+    attendance integer,
+    attendance_auto_absent boolean DEFAULT false NOT NULL,
+    attendance_at timestamp with time zone,
+    attendance_marked_by_user_id uuid,
+    flag_first_time boolean DEFAULT false NOT NULL,
+    flag_makeup boolean DEFAULT false NOT NULL,
+    flag_policy boolean DEFAULT false NOT NULL,
+    flag_owes boolean DEFAULT false NOT NULL,
+    flag_trial boolean DEFAULT false NOT NULL,
+    balance_amount numeric
 );
 
 
@@ -503,6 +524,27 @@ CREATE INDEX idx_sessions_user ON public.sessions USING btree (user_id);
 
 
 --
+-- Name: roster_entries_instructor_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX roster_entries_instructor_idx ON public.roster_entries USING btree (location_id, class_date, instructor_name);
+
+
+--
+-- Name: roster_entries_location_date_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX roster_entries_location_date_idx ON public.roster_entries USING btree (location_id, class_date);
+
+
+--
+-- Name: roster_entries_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX roster_entries_unique ON public.roster_entries USING btree (location_id, class_date, start_time, swimmer_name);
+
+
+--
 -- Name: roster_uploads_location_id_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -514,6 +556,13 @@ CREATE INDEX roster_uploads_location_id_idx ON public.roster_uploads USING btree
 --
 
 CREATE INDEX roster_uploads_uploaded_at_idx ON public.roster_uploads USING btree (uploaded_at);
+
+
+--
+-- Name: roster_entries trg_roster_entries_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_roster_entries_updated_at BEFORE UPDATE ON public.roster_entries FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -572,11 +621,35 @@ ALTER TABLE ONLY public.coverage_overrides
 
 
 --
+-- Name: roster_entries roster_entries_attendance_marked_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roster_entries
+    ADD CONSTRAINT roster_entries_attendance_marked_by_user_id_fkey FOREIGN KEY (attendance_marked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: roster_entries roster_entries_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roster_entries
+    ADD CONSTRAINT roster_entries_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+
+--
 -- Name: roster_entries roster_entries_roster_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.roster_entries
     ADD CONSTRAINT roster_entries_roster_id_fkey FOREIGN KEY (roster_id) REFERENCES public.rosters(id) ON DELETE CASCADE;
+
+
+--
+-- Name: roster_entries roster_entries_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roster_entries
+    ADD CONSTRAINT roster_entries_upload_id_fkey FOREIGN KEY (upload_id) REFERENCES public.roster_uploads(id) ON DELETE SET NULL;
 
 
 --
@@ -647,7 +720,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict s4S2WnHVyU1c9XwNoxoScg44CI3Nt99dzc4iaggJVTMf2KThXgN8P5D2vXKldeP
+\unrestrict DEM3lguJodUtHTigDSfoW9kze0zCl9HioZgOrnMnueSIdMy7yVIyQyYhz6r43d0
 
 
 --
@@ -665,4 +738,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260131170415'),
     ('20260131170558'),
     ('20260131172123'),
-    ('20260201120000');
+    ('20260201120000'),
+    ('20260201123000'),
+    ('20260201124500'),
+    ('20260201131000');
