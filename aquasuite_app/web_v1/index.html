@@ -361,6 +361,20 @@
     </div>
   </div>
 
-  <script src="/web/services/app.js"></script>
+  <script>
+    (function(){
+      function load(v){
+        var link = document.querySelector("link[href^=\"/web/components/styles.css\"]");
+        if (link) link.href = "/web/components/styles.css?v=" + v;
+        var s = document.createElement("script");
+        s.src = "/web/services/app.js?v=" + v;
+        document.body.appendChild(s);
+      }
+      fetch("/version.json", { cache: "no-store" })
+        .then(function(r){ return r.json(); })
+        .then(function(d){ load((d.buildTime || d.builtAt || Date.now())); })
+        .catch(function(){ load(Date.now()); });
+    })();
+  </script>
 </body>
 </html>
