@@ -11,6 +11,7 @@ import crypto from 'crypto'
 import { nanoid } from 'nanoid'
 import { parseIclassproRollsheet } from './parsers/parseRollsheet.js'
 import { parseIclassproRosterEntries } from './parsers/parseRosterEntries.js'
+import { hasIntegration, listLocationUuids, maskUuid, validateEnv, getDefaultLocationKey } from './config/keys.js'
 import { normalizeName } from './utils/normalizeName.js'
 import { preflightReport } from './services/reportPreflight.js'
 import { extractInstructorRetention, parseUsDate } from './utils/reportParsing.js'
@@ -24,6 +25,14 @@ const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 const app = Fastify({ logger: true })
+
+try {
+  validateEnv()
+} catch (err) {
+  const message = err instanceof Error ? err.message : "Invalid environment configuration"
+  console.error(message)
+  process.exit(1)
+}
 await app.register(cors, { origin: true })
 await app.register(websocket)
 await app.register(multipart, {
@@ -52,9 +61,60 @@ async function getUserRoleKey(userId: string) {
   return res.rowCount ? res.rows[0].key : null
 }
 
+async function getUserRoleKeys(userId: string) {
+  const res = await pool.query(
+    `SELECT r.key
+     FROM user_roles ur
+     JOIN roles r ON r.id = ur.role_id
+     WHERE ur.user_id=$1`,
+    [userId]
+  )
+
+  if (res.rowCount) return res.rows.map((r) => r.key)
+
+  const primary = await getUserRoleKey(userId)
+  return primary ? [primary] : []
+}
+
+function mapEffectiveRoleKey(key: string | null) {
+  const raw = String(key || '').trim().toLowerCase()
+  if (['owner','exec_admin','admin'].includes(raw)) return 'admin'
+  if (['front_desk','virtual_desk','manager'].includes(raw)) return 'manager'
+  if (['deck','staff','instructor'].includes(raw)) return 'instructor'
+  return 'readonly'
+}
+
+function pickEffectiveRole(keys: string[]) {
+  const mapped = keys.map(mapEffectiveRoleKey)
+  if (mapped.includes('admin')) return 'admin'
+  if (mapped.includes('manager')) return 'manager'
+  if (mapped.includes('instructor')) return 'instructor'
+  return 'readonly'
+}
+
+async function getEffectiveRoleKey(userId: string) {
+  const keys = await getUserRoleKeys(userId)
+  return pickEffectiveRole(keys)
+}
+
+async function requireRole(userId: string, role: 'admin' | 'manager' | 'instructor' | 'readonly') {
+  const effective = await getEffectiveRoleKey(userId)
+  return effective === role
+}
+
+async function requireAnyRole(userId: string, roles: Array<'admin' | 'manager' | 'instructor' | 'readonly'>) {
+  const effective = await getEffectiveRoleKey(userId)
+  return roles.includes(effective)
+}
+
 async function requireLocationAccess(userId: string, locationId: string) {
+  const effective = await getEffectiveRoleKey(userId)
+  if (effective === 'admin') return true
+
   const access = await pool.query(
-    `SELECT 1 FROM user_location_access WHERE user_id=$1 AND location_id=$2`,
+    `SELECT 1 FROM user_locations WHERE user_id=$1 AND location_id=$2
+     UNION
+     SELECT 1 FROM user_location_access WHERE user_id=$1 AND location_id=$2`,
     [userId, locationId]
   )
   return access.rowCount > 0
@@ -77,9 +137,42 @@ async function upsertStaffDirectory(locationId: string, fullName: string | null,
   return res.rows[0]?.id || null
 }
 
+
+async function isDayClosed(locationId: string, date: string) {
+  const res = await pool.query(
+    `SELECT id, reopened_at FROM day_closures WHERE location_id=$1 AND closed_date=$2`,
+    [locationId, date]
+  )
+  if (!res.rowCount) return false
+  return res.rows[0].reopened_at ? false : true
+}
 async function requireAdmin(userId: string) {
-  const key = await getUserRoleKey(userId)
-  return key === 'owner' || key === 'exec_admin'
+  const effective = await getEffectiveRoleKey(userId)
+  return effective === 'admin'
+}
+
+async function logAdminAction(actorUserId: string, actionType: string, targetUserId?: string | null, locationId?: string | null, metadata?: any) {
+  await pool.query(
+    `INSERT INTO admin_actions (actor_user_id, action_type, target_user_id, location_id, metadata_json)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [actorUserId, actionType, targetUserId || null, locationId || null, metadata ? JSON.stringify(metadata) : null]
+  )
+}
+
+async function logAuditEvent(locationId: string | null, actorUserId: string | null, eventType: string, entityType?: string | null, entityId?: string | null, payload?: any) {
+  await pool.query(
+    `INSERT INTO audit_events (location_id, actor_user_id, event_type, entity_type, entity_id, payload_json)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [locationId || null, actorUserId || null, eventType, entityType || null, entityId || null, payload ? JSON.stringify(payload) : null]
+  )
+}
+
+async function createNotification(locationId: string | null, type: string, message: string, createdBy: string | null, payload?: any) {
+  await pool.query(
+    `INSERT INTO notifications (location_id, type, message, created_by, payload_json)
+     VALUES ($1,$2,$3,$4,$5)`,
+    [locationId || null, type, message, createdBy || null, payload ? JSON.stringify(payload) : null]
+  )
 }
 
 async function resolveInstructorStaffId(locationId: string, rawName: string | null) {
@@ -127,8 +220,36 @@ const BUILD_TIME = new Date().toISOString()
 app.get('/meta', async () => ({
   version: APP_VERSION,
   buildTime: BUILD_TIME,
-  gitSha: process.env.GIT_SHA || 'dev'
+  gitSha: process.env.GIT_SHA || 'dev',
+  defaultLocationKey: getDefaultLocationKey(),
+  locations: listLocationUuids().map((loc) => ({
+    key: loc.key,
+    uuidMasked: maskUuid(loc.uuid)
+  })),
+  integrations: {
+    homebase: hasIntegration('homebase'),
+    hubspot: hasIntegration('hubspot')
+  }
 }))
+
+app.get('/admin/config-check', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const ok = await requireAdmin(sess.user_id)
+  if (!ok) return reply.code(403).send({ error: 'forbidden' })
+
+  return {
+    HOMEBASE_API_KEY: hasIntegration('homebase'),
+    HUBSPOT_ACCESS_TOKEN: hasIntegration('hubspot'),
+    LOCATION_UUID_CA: Boolean(process.env.LOCATION_UUID_CA),
+    LOCATION_UUID_NV: Boolean(process.env.LOCATION_UUID_NV),
+    LOCATION_UUID_NY: Boolean(process.env.LOCATION_UUID_NY),
+    LOCATION_UUID_TX: Boolean(process.env.LOCATION_UUID_TX),
+    DEFAULT_LOCATION_KEY: Boolean(process.env.DEFAULT_LOCATION_KEY)
+  }
+})
+
+
+
 
 
 
@@ -145,7 +266,7 @@ app.post('/auth/login', async (req, reply) => {
 
   const userRes = await pool.query(
     `SELECT u.id, u.first_name, u.last_name, u.username, u.pin_hash, u.must_change_pin,
-            u.primary_role_id, u.is_active, r.key as role_key, r.label as role_label
+            u.primary_role_id, u.is_active, u.is_disabled, r.key as role_key, r.label as role_label
      FROM users u
      JOIN roles r ON r.id = u.primary_role_id
      WHERE u.username=$1`,
@@ -155,6 +276,7 @@ app.post('/auth/login', async (req, reply) => {
   if (userRes.rowCount === 0) return reply.code(401).send({ error: 'invalid_credentials' })
   const user = userRes.rows[0]
   if (!user.is_active) return reply.code(403).send({ error: 'user_inactive' })
+  if (user.is_disabled) return reply.code(403).send({ error: 'user_disabled' })
 
   const ok = await bcrypt.compare(pin, user.pin_hash)
   if (!ok) return reply.code(401).send({ error: 'invalid_credentials' })
@@ -169,6 +291,8 @@ app.post('/auth/login', async (req, reply) => {
     [user.id, tokenHash, expiresAt]
   )
 
+  const effectiveRoleKey = await getEffectiveRoleKey(user.id)
+
   return reply.send({
     token: tokenPlain,
     user: {
@@ -179,6 +303,7 @@ app.post('/auth/login', async (req, reply) => {
       roleId: user.primary_role_id,
       roleKey: user.role_key,
       roleLabel: user.role_label,
+      effectiveRoleKey,
       mustChangePin: user.must_change_pin
     }
   })
@@ -207,6 +332,19 @@ app.addHook('preHandler', async (req, reply) => {
   if (new Date(sess.expires_at).getTime() < Date.now()) return reply.code(401).send({ error: 'expired_token' })
 
   ;(req as any).session = sess
+
+  const userRes = await pool.query(
+    `SELECT must_change_pin, is_active, is_disabled FROM users WHERE id=$1`,
+    [sess.user_id]
+  )
+  if (userRes.rowCount === 0) return reply.code(401).send({ error: 'invalid_user' })
+  const user = userRes.rows[0]
+  if (!user.is_active || user.is_disabled) return reply.code(403).send({ error: 'user_inactive' })
+
+  const mustChangeAllow = new Set(['/auth/change-pin'])
+  if (user.must_change_pin && !mustChangeAllow.has(pathname)) {
+    return reply.code(403).send({ error: 'must_change_pin' })
+  }
 })
 
 app.get('/me', async (req) => {
@@ -219,20 +357,486 @@ app.get('/me', async (req) => {
      WHERE u.id=$1`,
     [sess.user_id]
   )
-  return { user: res.rows[0] }
+  const user = res.rows[0]
+  const effectiveRoleKey = await getEffectiveRoleKey(user.id)
+  return { user: { ...user, effectiveRoleKey } }
+})
+
+
+
+app.post('/admin/data-quality/run', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const body = req.body as { locationId?: string; date?: string }
+  const locationId = body?.locationId
+  const date = body?.date
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const alerts: any[] = []
+  const classes = await pool.query(
+    `SELECT id, class_name, scheduled_instructor, actual_instructor
+     FROM class_instances
+     WHERE location_id=$1 AND class_date=$2`,
+    [locationId, date]
+  )
+  const noInstructor = classes.rows.filter((c) => !c.scheduled_instructor && !c.actual_instructor)
+  noInstructor.forEach((c) => alerts.push({ type: 'class_no_instructor', severity: 'warn', entity_id: c.id, message: 'Class missing instructor' }))
+
+  const swimmers = await pool.query(
+    `SELECT class_name, COUNT(*)::int AS swimmer_count
+     FROM roster_entries
+     WHERE location_id=$1 AND class_date=$2
+     GROUP BY class_name`,
+    [locationId, date]
+  )
+  swimmers.rows.forEach((row) => {
+    if (row.swimmer_count == 0) alerts.push({ type: 'class_no_swimmers', severity: 'warn', entity_id: null, message: `Class ${row.class_name} has zero swimmers` })
+  })
+
+  await pool.query(`DELETE FROM alerts WHERE location_id=$1 AND created_at::date=$2`, [locationId, date])
+  for (const a of alerts) {
+    await pool.query(
+      `INSERT INTO alerts (location_id, type, severity, entity_type, entity_id, message)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [locationId, a.type, a.severity, a.type.startsWith('class') ? 'class_instance' : null, a.entity_id, a.message]
+    )
+  }
+
+  return { ok: true, alertsInserted: alerts.length }
+})
+
+app.get('/admin/activity-feed', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const eventType = (req.query as any)?.eventType as string | undefined
+  const actorUserId = (req.query as any)?.actorUserId as string | undefined
+  const from = (req.query as any)?.from as string | undefined
+  const to = (req.query as any)?.to as string | undefined
+  const limit = Math.min(200, Number((req.query as any)?.limit || 100))
+
+  const params: any[] = []
+  let where = 'WHERE 1=1'
+  if (locationId && locationId !== 'all') {
+    params.push(locationId)
+    where += ` AND (location_id = $${params.length} OR location_id IS NULL)`
+  }
+  if (eventType) {
+    params.push(eventType)
+    where += ` AND event_type = $${params.length}`
+  }
+
+  if (actorUserId) {
+    params.push(actorUserId)
+    where += ` AND actor_user_id = $${params.length}`
+  }
+  if (from) {
+    params.push(from)
+    where += ` AND created_at >= $${params.length}`
+  }
+  if (to) {
+    params.push(to)
+    where += ` AND created_at <= $${params.length}`
+  }
+
+  const res = await pool.query(
+    `SELECT id, created_at, event_type, entity_id, location_id, actor_user_id, payload
+     FROM activity_feed
+     ${where}
+     ORDER BY created_at DESC
+     LIMIT ${limit}`,
+    params
+  )
+
+  return { events: res.rows }
+})
+
+app.get('/admin/audit-events', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const eventType = (req.query as any)?.eventType as string | undefined
+  const limit = Math.min(200, Number((req.query as any)?.limit || 100))
+
+  const params: any[] = []
+  let where = 'WHERE 1=1'
+  if (locationId && locationId !== 'all') {
+    params.push(locationId)
+    where += ` AND location_id = $${params.length}`
+  }
+  if (eventType) {
+    params.push(eventType)
+    where += ` AND event_type = $${params.length}`
+  }
+
+  const res = await pool.query(
+    `SELECT id, created_at, event_type, entity_type, entity_id, location_id, actor_user_id, payload_json
+     FROM audit_events
+     ${where}
+     ORDER BY created_at DESC
+     LIMIT ${limit}`,
+    params
+  )
+
+  return { events: res.rows }
+})
+
+
+app.get('/admin/lineage', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const classInstanceId = (req.query as any)?.classInstanceId as string | undefined
+  if (!classInstanceId) return reply.code(400).send({ error: 'classInstanceId_required' })
+
+  const classRes = await pool.query(
+    `SELECT id, location_id, upload_id, class_date, start_time, end_time, class_name,
+            scheduled_instructor, actual_instructor, is_sub, created_at
+     FROM class_instances WHERE id=$1`,
+    [classInstanceId]
+  )
+  if (!classRes.rowCount) return reply.code(404).send({ error: 'class_instance_not_found' })
+  const classInstance = classRes.rows[0]
+
+  const uploadRes = classInstance.upload_id
+    ? await pool.query(
+        `SELECT id, original_filename, uploaded_at, parse_status, parse_error, sha256
+         FROM roster_uploads WHERE id=$1`,
+        [classInstance.upload_id]
+      )
+    : { rows: [] }
+
+  const rosterRes = await pool.query(
+    `SELECT id, attendance, attendance_at, attendance_marked_by_user_id
+     FROM roster_entries
+     WHERE location_id=$1 AND class_date=$2 AND start_time=$3 AND class_name=$4`,
+    [classInstance.location_id, classInstance.class_date, classInstance.start_time, classInstance.class_name]
+  )
+
+  const rosterIds = rosterRes.rows.map((r) => r.id)
+  const attendanceEvents = rosterIds.length
+    ? await pool.query(
+        `SELECT id, roster_entry_id, marked_status, marked_at, marked_by_user_id, note
+         FROM attendance_events
+         WHERE roster_entry_id = ANY($1::uuid[])
+         ORDER BY marked_at DESC
+         LIMIT 50`,
+        [rosterIds]
+      )
+    : { rows: [] }
+
+  const notesRes = await pool.query(
+    `SELECT id, note, is_internal, created_by, created_at
+     FROM entity_notes
+     WHERE entity_type='class_instance' AND entity_id=$1
+     ORDER BY created_at DESC`,
+    [classInstanceId]
+  )
+
+  return {
+    classInstance,
+    rosterUpload: uploadRes.rows[0] || null,
+    rosterEntries: { count: rosterRes.rows.length, entries: rosterRes.rows },
+    attendanceEvents: attendanceEvents.rows,
+    notes: notesRes.rows
+  }
+})
+
+app.get('/notifications', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const locationId = (req.query as any)?.locationId as string | undefined
+  if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const res = await pool.query(
+    `SELECT id, type, message, payload_json, created_at, read_at
+     FROM notifications
+     WHERE location_id=$1
+     ORDER BY created_at DESC
+     LIMIT 50`,
+    [locationId]
+  )
+
+  const notifications = res.rows.map((n) => ({
+    id: n.id,
+    type: n.type,
+    title: n.type.replace(/_/g, ' '),
+    message: n.message,
+    payload: n.payload_json,
+    created_at: n.created_at,
+    read_at: n.read_at
+  }))
+
+  return { notifications }
+})
+app.get('/admin/users', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const usersRes = await pool.query(
+    `SELECT u.id, u.first_name, u.last_name, u.username, u.must_change_pin, u.is_active, u.is_disabled,
+            r.key as role_key, r.label as role_label
+     FROM users u
+     JOIN roles r ON r.id = u.primary_role_id
+     ORDER BY u.last_name ASC, u.first_name ASC`
+  )
+
+  const rolesRes = await pool.query(
+    `SELECT ur.user_id, r.key
+     FROM user_roles ur
+     JOIN roles r ON r.id = ur.role_id`
+  )
+  const locationsRes = await pool.query(
+    `SELECT user_id, location_id, is_default FROM user_locations`
+  )
+
+  const rolesByUser = new Map()
+  rolesRes.rows.forEach((row) => {
+    const list = rolesByUser.get(row.user_id) || []
+    list.push(row.key)
+    rolesByUser.set(row.user_id, list)
+  })
+  const locationsByUser = new Map()
+  locationsRes.rows.forEach((row) => {
+    const list = locationsByUser.get(row.user_id) || []
+    list.push({ location_id: row.location_id, is_default: row.is_default })
+    locationsByUser.set(row.user_id, list)
+  })
+
+  const users = usersRes.rows.map((u) => ({
+    ...u,
+    effectiveRoleKey: null,
+    roles: rolesByUser.get(u.id) || [],
+    locations: locationsByUser.get(u.id) || []
+  }))
+
+  return { users }
+})
+
+app.post('/admin/users', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const body = req.body as any
+  const firstName = String(body?.firstName || '').trim()
+  const lastName = String(body?.lastName || '').trim()
+  const username = String(body?.username || '').trim().toLowerCase()
+  const roleKey = String(body?.roleKey || 'readonly').trim().toLowerCase()
+  const locationIds = Array.isArray(body?.locationIds) ? body.locationIds : []
+
+  if (!firstName || !lastName || !username) return reply.code(400).send({ error: 'missing_fields' })
+
+  const roleRes = await pool.query('SELECT id FROM roles WHERE key=$1', [roleKey])
+  if (roleRes.rowCount === 0) return reply.code(400).send({ error: 'invalid_role' })
+
+  const pinHash = await bcrypt.hash('1234', 10)
+  const userRes = await pool.query(
+    `INSERT INTO users (first_name, last_name, username, pin_hash, must_change_pin, primary_role_id)
+     VALUES ($1,$2,$3,$4,true,$5)
+     RETURNING id`,
+    [firstName, lastName, username, pinHash, roleRes.rows[0].id]
+  )
+  const userId = userRes.rows[0].id
+
+  await pool.query(
+    `INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+    [userId, roleRes.rows[0].id]
+  )
+
+  for (const locId of locationIds) {
+    await pool.query(
+      `INSERT INTO user_locations (user_id, location_id, is_default) VALUES ($1,$2,false)
+       ON CONFLICT (user_id, location_id) DO NOTHING`,
+      [userId, locId]
+    )
+  }
+
+  await logAdminAction(sess.user_id, 'user_created', userId, null, { roleKey, locationCount: locationIds.length })
+
+  return { ok: true, id: userId }
+})
+
+app.patch('/admin/users/:id', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const userId = (req.params as any)?.id as string
+  if (!userId) return reply.code(400).send({ error: 'user_id_required' })
+
+  const body = req.body as any
+  const fields = [] as string[]
+  const values: any[] = []
+  let idx = 1
+
+  if (body?.firstName) { fields.push(`first_name=$${idx++}`); values.push(String(body.firstName).trim()) }
+  if (body?.lastName) { fields.push(`last_name=$${idx++}`); values.push(String(body.lastName).trim()) }
+  if (body?.username) { fields.push(`username=$${idx++}`); values.push(String(body.username).trim().toLowerCase()) }
+  if (typeof body?.isActive === 'boolean') { fields.push(`is_active=$${idx++}`); values.push(Boolean(body.isActive)) }
+  if (typeof body?.isDisabled === 'boolean') { fields.push(`is_disabled=$${idx++}`); values.push(Boolean(body.isDisabled)) }
+
+  if (fields.length) {
+    values.push(userId)
+    await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id=$${idx}`, values)
+  }
+
+  if (body?.roleKey) {
+    const roleRes = await pool.query('SELECT id FROM roles WHERE key=$1', [String(body.roleKey).trim().toLowerCase()])
+    if (roleRes.rowCount) {
+      await pool.query(`DELETE FROM user_roles WHERE user_id=$1`, [userId])
+      await pool.query(`INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2)`, [userId, roleRes.rows[0].id])
+      await pool.query(`UPDATE users SET primary_role_id=$1 WHERE id=$2`, [roleRes.rows[0].id, userId])
+    }
+  }
+
+  if (Array.isArray(body?.locationIds)) {
+    await pool.query(`DELETE FROM user_locations WHERE user_id=$1`, [userId])
+    for (const locId of body.locationIds) {
+      await pool.query(
+        `INSERT INTO user_locations (user_id, location_id, is_default) VALUES ($1,$2,false)`,
+        [userId, locId]
+      )
+    }
+  }
+
+  await logAdminAction(sess.user_id, 'user_updated', userId, null, { updated: true })
+  return { ok: true }
+})
+
+app.post('/admin/users/:id/reset-pin', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const userId = (req.params as any)?.id as string
+  if (!userId) return reply.code(400).send({ error: 'user_id_required' })
+
+  const pinHash = await bcrypt.hash('1234', 10)
+  await pool.query(
+    `UPDATE users SET pin_hash=$1, must_change_pin=true WHERE id=$2`,
+    [pinHash, userId]
+  )
+
+  await logAdminAction(sess.user_id, 'user_pin_reset', userId, null, { pin: 'default' })
+
+  return { ok: true }
+})
+
+
+app.get('/closures', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const date = (req.query as any)?.date as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  if (locationId === 'all') {
+    const isAdmin = await requireAdmin(sess.user_id)
+    if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+    return { classes: [] }
+  }
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const res = await pool.query(
+    `SELECT id, closed_by, closed_at, reopened_by, reopened_at FROM day_closures WHERE location_id=$1 AND closed_date=$2`,
+    [locationId, date]
+  )
+  return { closure: res.rows[0] || null }
+})
+
+app.post('/closures', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const body = req.body as { locationId?: string; date?: string }
+  const locationId = body?.locationId
+  const date = body?.date
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  await pool.query(
+    `INSERT INTO day_closures (location_id, closed_date, closed_by)
+     VALUES ($1,$2,$3)
+     ON CONFLICT (location_id, closed_date) DO UPDATE SET
+       closed_by=EXCLUDED.closed_by,
+       closed_at=now(),
+       reopened_by=NULL,
+       reopened_at=NULL`,
+    [locationId, date, sess.user_id]
+  )
+
+  await logAdminAction(sess.user_id, 'day_closed', null, locationId, { date })
+  return { ok: true }
+})
+
+app.post('/closures/reopen', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const body = req.body as { locationId?: string; date?: string }
+  const locationId = body?.locationId
+  const date = body?.date
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  await pool.query(
+    `UPDATE day_closures SET reopened_by=$1, reopened_at=now() WHERE location_id=$2 AND closed_date=$3`,
+    [sess.user_id, locationId, date]
+  )
+
+  await logAdminAction(sess.user_id, 'day_reopened', null, locationId, { date })
+  return { ok: true }
 })
 
 app.get('/locations', async (req) => {
   const sess = (req as any).session as { user_id: string }
-  const res = await pool.query(
-    `SELECT l.id, l.code, l.name, l.state, l.timezone, l.features,
-            l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled
-     FROM user_location_access ula
-     JOIN locations l ON l.id = ula.location_id
-     WHERE ula.user_id = $1 AND l.is_active = true
-     ORDER BY ula.is_default DESC, l.name ASC`,
-    [sess.user_id]
-  )
+  const effective = await getEffectiveRoleKey(sess.user_id)
+
+  let res
+  if (effective === 'admin') {
+    res = await pool.query(
+      `SELECT l.id, l.code, l.name, l.state, l.timezone, l.features,
+              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled
+       FROM locations l
+       WHERE l.is_active = true
+       ORDER BY l.name ASC`
+    )
+  } else {
+    res = await pool.query(
+      `SELECT l.id, l.code, l.name, l.state, l.timezone, l.features,
+              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled
+       FROM (
+         SELECT location_id, is_default FROM user_locations WHERE user_id=$1
+         UNION
+         SELECT location_id, is_default FROM user_location_access WHERE user_id=$1
+       ) ula
+       JOIN locations l ON l.id = ula.location_id
+       WHERE l.is_active = true
+       ORDER BY ula.is_default DESC, l.name ASC`,
+      [sess.user_id]
+    )
+  }
+
   const locations = res.rows.map((loc) => ({
     ...loc,
     features: normalizeLocationFeatures(loc)
@@ -296,6 +900,11 @@ app.patch('/locations/:id', async (req, reply) => {
     ]
   )
 
+  await logAuditEvent(locationId, sess.user_id, 'location_updated', 'location', locationId, {
+    intake_enabled: body.intake_enabled ?? null,
+    announcer_enabled: body.announcer_enabled ?? null
+  })
+
   return { ok: true }
 })
 
@@ -336,25 +945,33 @@ app.get('/permissions', async (req, reply) => {
 app.post('/auth/change-pin', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
   const body = req.body as { oldPin?: string; newPin?: string }
-  const oldPin = body.oldPin || ''
-  const newPin = body.newPin || ''
+  const newPin = String(body?.newPin || '').trim()
 
-  if (!oldPin || !newPin) return reply.code(400).send({ error: 'old_and_new_required' })
-  if (newPin.length < 4) return reply.code(400).send({ error: 'pin_too_short' })
+  if (!newPin || newPin.length < 4) return reply.code(400).send({ error: 'pin_invalid' })
 
   const userRes = await pool.query(
-    `SELECT pin_hash FROM users WHERE id=$1`,
+    `SELECT id, pin_hash, must_change_pin, is_active, is_disabled FROM users WHERE id=$1`,
     [sess.user_id]
   )
   if (userRes.rowCount === 0) return reply.code(404).send({ error: 'user_not_found' })
+  const user = userRes.rows[0]
+  if (!user.is_active || user.is_disabled) return reply.code(403).send({ error: 'user_inactive' })
 
-  const ok = await bcrypt.compare(oldPin, userRes.rows[0].pin_hash)
-  if (!ok) return reply.code(401).send({ error: 'invalid_old_pin' })
+  if (!user.must_change_pin) {
+    const oldPin = String(body?.oldPin || '').trim()
+    const ok = await bcrypt.compare(oldPin, user.pin_hash)
+    if (!ok) return reply.code(401).send({ error: 'invalid_pin' })
+  }
 
-  const newHash = await bcrypt.hash(newPin, 12)
+  const newHash = await bcrypt.hash(newPin, 10)
   await pool.query(
     `UPDATE users SET pin_hash=$1, must_change_pin=false WHERE id=$2`,
     [newHash, sess.user_id]
+  )
+
+  await pool.query(
+    `INSERT INTO auth_audit_log (user_id, event_type, details) VALUES ($1, 'pin_changed', $2)`,
+    [sess.user_id, JSON.stringify({ source: 'self' })]
   )
 
   return { ok: true }
@@ -503,6 +1120,9 @@ app.post('/auth/2fa/admin-reset', async (req, reply) => {
  */
 app.post('/reports/preflight', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const query = req.query as any
   const body = req.body as any
   const locationId = query?.locationId || body?.locationId
@@ -573,6 +1193,9 @@ app.post('/reports/preflight', async (req, reply) => {
 
 app.post('/reports/upload', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const query = req.query as any
   const body = req.body as any
   const locationId = query?.locationId || body?.locationId
@@ -706,10 +1329,73 @@ app.post('/reports/upload', async (req, reply) => {
   })
 })
 
+app.post('/uploads/roster/preflight', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const date = (req.query as any)?.date as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  if (locationId === 'all') {
+    const isAdmin = await requireAdmin(sess.user_id)
+    if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+    return { classes: [] }
+  }
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const file = await (req as any).file()
+  if (!file) return reply.code(400).send({ error: 'file_required' })
+
+  const buf = await file.toBuffer()
+  const html = buf.toString('utf8')
+  const hash = sha256(html)
+
+  const dupRes = await pool.query(
+    `SELECT 1 FROM roster_uploads WHERE location_id=$1 AND sha256=$2 LIMIT 1`,
+    [locationId, hash]
+  )
+  const isDuplicate = dupRes.rowCount > 0
+
+  let parsed
+  let rosterParsed
+  try {
+    parsed = parseIclassproRollsheet(html)
+    rosterParsed = parseIclassproRosterEntries(html)
+  } catch (e: any) {
+    return reply.code(400).send({ error: 'parse_failed', message: String(e?.message || e) })
+  }
+
+  const classDates = (parsed.classes || []).map((c: any) => c.classDate).filter(Boolean).sort()
+  const dateStart = classDates[0] || null
+  const dateEnd = classDates[classDates.length - 1] || null
+
+  const locRes = await pool.query(`SELECT name FROM locations WHERE id=$1`, [locationId])
+  const locationName = locRes.rows[0]?.name || null
+
+  return reply.send({
+    ok: true,
+    hash,
+    locationName,
+    classCount: parsed.classes.length,
+    swimmerCount: rosterParsed.entries.length,
+    dateStart,
+    dateEnd,
+    isDuplicate
+  })
+})
+
 app.post('/uploads/roster', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const locationId = (req.query as any)?.locationId as string | undefined
-  if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
+  const date = (req.query as any)?.date as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -906,6 +1592,11 @@ app.post('/uploads/roster', async (req, reply) => {
     client.release()
   }
 
+  await logAuditEvent(locationId, sess.user_id, 'roster_upload_ingested', 'roster_upload', uploadId, {
+    filename: file.filename || 'roster.html',
+    hash
+  })
+
   return reply.send({
     ok: true,
     uploadId,
@@ -932,7 +1623,19 @@ app.get('/class-instances', async (req, reply) => {
      ORDER BY start_time ASC, class_name ASC`,
     [locationId, date]
   )
-  return { classes: res.rows }
+
+  const classes = await Promise.all(
+    res.rows.map(async (row) => {
+      const instructorUserId = await resolveInstructorStaffId(locationId, row.actual_instructor || row.scheduled_instructor || null)
+      return {
+        ...row,
+        instructor_original_name: row.scheduled_instructor,
+        instructor_actual_name: row.actual_instructor,
+        instructor_user_id: instructorUserId
+      }
+    })
+  )
+  return { classes }
 })
 
 app.get('/class-instances/mine', async (req, reply) => {
@@ -970,7 +1673,19 @@ app.get('/class-instances/mine', async (req, reply) => {
     [locationId, date, forms]
   )
 
-  return { classes: res.rows }
+  const classes = await Promise.all(
+    res.rows.map(async (row) => {
+      const instructorUserId = await resolveInstructorStaffId(locationId, row.actual_instructor || row.scheduled_instructor || null)
+      return {
+        ...row,
+        instructor_original_name: row.scheduled_instructor,
+        instructor_actual_name: row.actual_instructor,
+        instructor_user_id: instructorUserId
+      }
+    })
+  )
+
+  return { classes }
 })
 
 app.get('/roster-entries', async (req, reply) => {
@@ -979,6 +1694,30 @@ app.get('/roster-entries', async (req, reply) => {
   const date = (req.query as any)?.date as string | undefined
   const startTime = (req.query as any)?.start_time as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  if (locationId === 'all') {
+    const isAdmin = await requireAdmin(sess.user_id)
+    if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+    const params: any[] = [date]
+    let filter = ''
+    if (startTime) {
+      params.push(startTime)
+      filter = ' AND r.start_time = $2'
+    }
+    const res = await pool.query(
+      `SELECT r.id, r.class_date, r.start_time, r.class_name, r.swimmer_name, r.age_text, r.program, r.level,
+              r.instructor_name, r.scheduled_instructor, r.actual_instructor, r.is_sub, r.zone,
+              r.instructor_name_raw, r.instructor_name_norm, r.instructor_staff_id,
+              r.attendance, r.attendance_auto_absent, r.flag_first_time, r.flag_makeup, r.flag_policy, r.flag_owes, r.flag_trial,
+              r.balance_amount, l.name AS location_name
+       FROM roster_entries r
+       JOIN locations l ON l.id = r.location_id
+       WHERE r.class_date=$1${filter}
+       ORDER BY r.start_time ASC, r.instructor_name ASC, r.swimmer_name ASC`,
+      params
+    )
+    return { entries: res.rows }
+  }
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -1011,6 +1750,30 @@ app.get('/roster-entries/mine', async (req, reply) => {
   const date = (req.query as any)?.date as string | undefined
   const startTime = (req.query as any)?.start_time as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  if (locationId === 'all') {
+    const isAdmin = await requireAdmin(sess.user_id)
+    if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+    const params: any[] = [date]
+    let filter = ''
+    if (startTime) {
+      params.push(startTime)
+      filter = ' AND r.start_time = $2'
+    }
+    const res = await pool.query(
+      `SELECT r.id, r.class_date, r.start_time, r.class_name, r.swimmer_name, r.age_text, r.program, r.level,
+              r.instructor_name, r.scheduled_instructor, r.actual_instructor, r.is_sub, r.zone,
+              r.instructor_name_raw, r.instructor_name_norm, r.instructor_staff_id,
+              r.attendance, r.attendance_auto_absent, r.flag_first_time, r.flag_makeup, r.flag_policy, r.flag_owes, r.flag_trial,
+              r.balance_amount, l.name AS location_name
+       FROM roster_entries r
+       JOIN locations l ON l.id = r.location_id
+       WHERE r.class_date=$1${filter}
+       ORDER BY r.start_time ASC, r.instructor_name ASC, r.swimmer_name ASC`,
+      params
+    )
+    return { entries: res.rows }
+  }
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -1109,6 +1872,8 @@ app.post('/attendance', async (req, reply) => {
     [att, attendanceAt, att === null ? null : sess.user_id, rosterEntryId]
   )
 
+  await logAuditEvent(locationId, sess.user_id, 'attendance', 'roster_entry', rosterEntryId, { attendance: att })
+
   return { ok: true, attendance: att }
 })
 
@@ -1132,6 +1897,8 @@ app.post('/attendance/bulk', async (req, reply) => {
      WHERE location_id=$4 AND class_date=$5 AND start_time=$6`,
     [att, attendanceAt, att === null ? null : sess.user_id, locationId, date, startTime]
   )
+
+  await logAuditEvent(locationId, sess.user_id, 'attendance_bulk', 'class_block', null, { attendance: att, date, startTime })
 
   return { ok: true, updated: res.rowCount }
 })
@@ -1257,8 +2024,12 @@ app.post('/observations', async (req, reply) => {
 
 app.get('/staff', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const locationId = (req.query as any)?.locationId as string | undefined
-  if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
+  const date = (req.query as any)?.date as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -1286,6 +2057,9 @@ app.get('/staff', async (req, reply) => {
 
 app.get('/instructor-variants', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const locationId = (req.query as any)?.locationId as string | undefined
   const sinceDays = Number((req.query as any)?.sinceDays || 90)
   if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
@@ -1312,8 +2086,12 @@ app.get('/instructor-variants', async (req, reply) => {
 
 app.get('/instructor-aliases', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const locationId = (req.query as any)?.locationId as string | undefined
-  if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
+  const date = (req.query as any)?.date as string | undefined
+  if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -1356,6 +2134,9 @@ app.post('/instructor-aliases', async (req, reply) => {
 
 app.post('/instructor-aliases/apply', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const body = req.body as { locationId?: string; aliasRaw?: string; staffId?: string }
   if (!body.locationId || !body.aliasRaw || !body.staffId) {
     return reply.code(400).send({ error: 'locationId_aliasRaw_staffId_required' })
@@ -1374,8 +2155,151 @@ app.post('/instructor-aliases/apply', async (req, reply) => {
   return { ok: true, updated: res.rowCount }
 })
 
+
+
+app.get('/alerts', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const res = await pool.query(
+    `SELECT id, type, severity, entity_type, entity_id, message, created_at, resolved_at
+     FROM alerts
+     WHERE location_id=$1 AND resolved_at IS NULL
+     ORDER BY created_at DESC`,
+    [locationId]
+  )
+
+  return { alerts: res.rows }
+})
+
+app.post('/alerts/:id/resolve', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const alertId = (req.params as any)?.id as string
+  const note = (req.body as any)?.note as string | undefined
+  if (!alertId) return reply.code(400).send({ error: 'alert_id_required' })
+
+  const alertRes = await pool.query(`SELECT location_id FROM alerts WHERE id=$1`, [alertId])
+  if (!alertRes.rowCount) return reply.code(404).send({ error: 'alert_not_found' })
+  const locationId = alertRes.rows[0].location_id
+  if (locationId) {
+    const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  await pool.query(
+    `UPDATE alerts SET resolved_at=now(), resolved_by=$1, resolved_note=$2 WHERE id=$3`,
+    [sess.user_id, note || null, alertId]
+  )
+
+  await logAdminAction(sess.user_id, 'alert_resolved', null, locationId, { alertId, note: note || null })
+  await logAuditEvent(locationId || null, sess.user_id, 'alert_resolved', 'alert', alertId, { note: note || null })
+  return { ok: true }
+})
+
+app.get('/notes', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const entityType = (req.query as any)?.entityType as string | undefined
+  const entityId = (req.query as any)?.entityId as string | undefined
+  const locationId = (req.query as any)?.locationId as string | undefined
+  if (!entityType || !entityId) return reply.code(400).send({ error: 'entity_required' })
+
+  if (locationId) {
+    const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  const res = await pool.query(
+    `SELECT id, entity_type, entity_id, note, is_internal, created_by, created_at
+     FROM entity_notes
+     WHERE entity_type=$1 AND entity_id=$2
+     ORDER BY created_at DESC`,
+    [entityType, entityId]
+  )
+  return { notes: res.rows }
+})
+
+app.post('/ssp/pass', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager','instructor'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const body = req.body as { locationId?: string; rosterEntryId?: string; classInstanceId?: string | null }
+  if (!body.locationId || !body.rosterEntryId) return reply.code(400).send({ error: 'locationId_and_rosterEntryId_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, body.locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const entryRes = await pool.query(
+    `SELECT id, swimmer_name, instructor_name, scheduled_instructor, actual_instructor
+     FROM roster_entries
+     WHERE id=$1 AND location_id=$2`,
+    [body.rosterEntryId, body.locationId]
+  )
+  if (!entryRes.rowCount) return reply.code(404).send({ error: 'roster_entry_not_found' })
+
+  await pool.query(
+    `UPDATE roster_entries
+     SET ssp_passed=true, ssp_passed_at=now(), ssp_passed_by_user_id=$1
+     WHERE id=$2`,
+    [sess.user_id, body.rosterEntryId]
+  )
+
+  const entry = entryRes.rows[0]
+  const instructor = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || ''
+  const message = `${entry.swimmer_name || 'Swimmer'} passed SSP (${instructor || 'Instructor'})`
+
+  await logAuditEvent(body.locationId, sess.user_id, 'ssp_pass', 'roster_entry', body.rosterEntryId, {
+    swimmer: entry.swimmer_name,
+    instructor,
+    classInstanceId: body.classInstanceId || null
+  })
+  await createNotification(body.locationId, 'ssp_pass', message, sess.user_id, {
+    swimmer: entry.swimmer_name,
+    instructor,
+    classInstanceId: body.classInstanceId || null
+  })
+
+  return { ok: true }
+})
+
+app.post('/notes', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const body = req.body as { locationId?: string; entityType?: string; entityId?: string; note?: string; isInternal?: boolean }
+  const locationId = body?.locationId
+  const entityType = body?.entityType
+  const entityId = body?.entityId
+  const note = String(body?.note || '').trim()
+
+  if (!locationId || !entityType || !entityId || !note) return reply.code(400).send({ error: 'missing_fields' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  await pool.query(
+    `INSERT INTO entity_notes (location_id, entity_type, entity_id, note, is_internal, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [locationId, entityType, entityId, note, body?.isInternal ?? true, sess.user_id]
+  )
+
+  await logAuditEvent(locationId, sess.user_id, 'note_created', entityType, entityId, { isInternal: body?.isInternal ?? true })
+  return { ok: true }
+})
+
 app.get('/intakes', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const locationId = (req.query as any)?.locationId as string | undefined
   const status = (req.query as any)?.status as string | undefined
   const owner = (req.query as any)?.owner as string | undefined
@@ -1417,6 +2341,9 @@ app.get('/intakes', async (req, reply) => {
 
 app.patch('/intakes/:id', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
   const intakeId = (req.params as any)?.id as string
   const body = req.body as {
     status?: string
@@ -1508,8 +2435,9 @@ app.get('/integrations/gmail/auth/callback', async (req, reply) => {
 })
 
 app.get('/integrations/hubspot/status', async (_req, reply) => {
-  const enabled = String(process.env.HUBSPOT_ENABLED || '').toLowerCase() === 'true'
-  return reply.send({ enabled, configured: enabled && !!process.env.HUBSPOT_PRIVATE_APP_TOKEN })
+  const configured = !!process.env.HUBSPOT_ACCESS_TOKEN
+  const enabled = configured
+  return reply.send({ enabled, configured })
 })
 
 app.get('/roster-uploads', async (req, reply) => {
@@ -1549,7 +2477,19 @@ app.get('/roster/day', async (req, reply) => {
      ORDER BY start_time ASC, class_name ASC`,
     [locationId, date]
   )
-  return { classes: res.rows }
+
+  const classes = await Promise.all(
+    res.rows.map(async (row) => {
+      const instructorUserId = await resolveInstructorStaffId(locationId, row.actual_instructor || row.scheduled_instructor || null)
+      return {
+        ...row,
+        instructor_original_name: row.scheduled_instructor,
+        instructor_actual_name: row.actual_instructor,
+        instructor_user_id: instructorUserId
+      }
+    })
+  )
+  return { classes }
 })
 
 app.get('/roster/my', async (req, reply) => {
@@ -1587,7 +2527,19 @@ app.get('/roster/my', async (req, reply) => {
     [locationId, date, forms]
   )
 
-  return { classes: res.rows }
+  const classes = await Promise.all(
+    res.rows.map(async (row) => {
+      const instructorUserId = await resolveInstructorStaffId(locationId, row.actual_instructor || row.scheduled_instructor || null)
+      return {
+        ...row,
+        instructor_original_name: row.scheduled_instructor,
+        instructor_actual_name: row.actual_instructor,
+        instructor_user_id: instructorUserId
+      }
+    })
+  )
+
+  return { classes }
 })
 
 const port = Number(process.env.PORT || 3001)

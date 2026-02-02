@@ -52,6 +52,19 @@ body{
   background: var(--cardA);
 }
 
+.qa-panel{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  padding:6px 8px;
+  border-radius:12px;
+  border:1px solid var(--line);
+  background: var(--surface);
+}
+.qa-panel select{ min-width:120px; }
+label.inline{ display:flex; align-items:center; gap:6px; }
+
 h1{ margin:0; font-size:22px; letter-spacing:.2px; }
 
 .card{
@@ -352,3 +365,82 @@ html[data-layout=desktop] #viewRoster > .card:first-child{
 }
 
 .roster-table thead th{ position: sticky; top: 0; background: var(--cardA); z-index: 2; }
+
+
+@media print {
+  body { background: #fff; color: #000; padding: 0; }
+  .topbar, .tabs, .page-tabs, .qa-panel, #filtersPanel, #filtersToggle, #logoutBtn, #revBtn { display: none !important; }
+  .card { box-shadow: none; border-color: #000; }
+  .print-only { display: block !important; }
+}
+
+.print-only { display: none; }
+
+/* Announcer-style minimal chrome */
+.topbar.minimal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #0e1114;
+  color: #fff;
+  border-bottom: 1px solid #1f2429;
+}
+.topbar.minimal .appTitle { font-size: 16px; font-weight: 700; }
+.topbar.minimal .contextLine { font-size: 12px; color: #b9c0c7; }
+.iconBtn {
+  background: transparent;
+  border: 1px solid #2a3138;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.35);
+  z-index: 20;
+}
+.drawer {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 240px;
+  background: #11161a; color: #fff; padding: 14px; z-index: 21;
+  border-right: 1px solid #1f2429;
+}
+.drawerHead { display:flex; align-items:center; justify-content: space-between; margin-bottom: 10px; }
+.drawerList { display:flex; flex-direction: column; gap: 6px; }
+.navItem {
+  background: #151b20; border: 1px solid #232a31; color:#fff;
+  padding: 8px 10px; border-radius: 6px; text-align: left; cursor: pointer;
+}
+.navItem:hover { background: #1b232b; }
+.navItem.active { background: #1f2a33; border-color: #394552; }
+.menu {
+  position: fixed; top: 56px; right: 12px; width: 320px;
+  background: #11161a; color: #fff; border: 1px solid #232a31;
+  border-radius: 10px; padding: 12px; z-index: 22;
+}
+.menuHead { display:flex; align-items:center; justify-content: space-between; margin-bottom: 8px; }
+.menuSection { border-top: 1px solid #1f2429; padding-top: 8px; margin-top: 8px; }
+.menuSection label { display:block; margin-bottom: 6px; }
+
+/* Announcer roster table */
+.roster-table.dense th, .roster-table.dense td { padding: 6px 8px; font-size: 12px; }
+.roster-table.dense thead th { background: #0f1419; color: #d8dee4; border-bottom: 1px solid #21262d; }
+.roster-row { border-bottom: 1px solid #1f2429; }
+.roster-row:hover { background: #11161a; }
+.attendance-btns button { width: 28px; height: 28px; font-size: 14px; }
+.saveStatus { font-size: 12px; color: #9fb3c8; }
+
+.time-active { margin-top: 8px; padding: 10px; border: 1px solid #2a3138; border-radius: 8px; background: #0f1419; color: #fff; }
+.blocks.hidden { display: none; }
+
+/* Layout preview frames */
+.device-frame { margin: 16px auto; background: #0b0e11; border-radius: 18px; padding: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.35); }
+.device-frame.phone { max-width: 420px; }
+.device-frame.tablet { max-width: 860px; }
+.device-frame.desktop { max-width: 1280px; }
+
+/* Hide admin tools when not enabled */
+.adminOnly.hidden { display: none !important; }
+
+/* Ensure app panel hidden when logged out */
+#appPanel.hidden { display: none !important; }

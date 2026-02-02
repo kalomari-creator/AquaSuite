@@ -25,118 +25,148 @@
       </form>
     </div>
 
+    <div id="deviceFrame" class="device-frame">
     <div id="appPanel" class="hidden">
-      <div class="topbar">
-        <div>
-          <h1>AquaSuite</h1>
-          <div class="muted tiny" id="locationHint">Roster + Announcer</div>
+      <div class="topbar minimal">
+        <button class="iconBtn" id="burgerBtn">☰</button>
+        <div class="titleBlock">
+          <div class="appTitle">AquaSuite</div>
+          <div class="contextLine"><span id="contextLocation">Location</span> · <span id="contextDate"></span></div>
         </div>
+        <div class="spacer"></div>
+        <button class="iconBtn" id="gearBtn">⚙️</button>
+      </div>
 
-        <div class="row">
+      <div id="navOverlay" class="overlay hidden"></div>
+      <div id="navDrawer" class="drawer hidden">
+        <div class="drawerHead">
+          <div class="appTitle">Menu</div>
+          <button class="iconBtn" id="navCloseBtn">✕</button>
+        </div>
+        <div class="drawerList">
+          <button class="navItem" data-view="roster">Roster</button>
+          <button class="navItem" data-view="uploads">Uploads</button>
+          <button class="navItem" data-view="reports">Reports</button>
+          <button class="navItem" data-view="observations">Observations</button>
+          <button class="navItem" data-view="staff">Staff</button>
+          <button class="navItem" data-view="intakes">Intakes</button>
+          <button class="navItem" data-view="locations">Locations</button>
+          <button class="navItem" data-view="activity" id="activityNav">Activity</button>
+          <button class="navItem" data-view="notifications" id="notificationsNav">Notifications</button>
+          <button class="navItem" data-view="announcer" id="announcerNav">Announcer</button>
+        </div>
+      </div>
+
+      <div id="gearMenu" class="menu hidden">
+        <div class="menuHead">
+          <div class="appTitle">Settings</div>
+          <button class="iconBtn" id="gearCloseBtn">✕</button>
+        </div>
+        <div class="menuSection">
           <label class="tiny">Location
             <select id="locationSelect"></select>
           </label>
           <label class="tiny">Date
             <input id="dateSelect" type="date" class="dateInput" />
           </label>
-        </div>
-
-        <div class="tabs" id="scheduleToggle">
-          <button class="tab active" data-mode="mine">My Schedule</button>
-          <button class="tab" data-mode="all">Full Roster</button>
-        </div>
-
-        <div class="spacer"></div>
-        <div class="pill" id="userInfo"></div>
-        <button class="miniBtn secondary" id="revBtn">Rev</button>
-        <button class="secondary" id="logoutBtn">Log out</button>
-      </div>
-
-      <div class="tabs page-tabs">
-        <button class="tab active" data-view="roster">Roster</button>
-        <button class="tab" data-view="uploads">Uploads</button>
-        <button class="tab" data-view="reports">Reports</button>
-        <button class="tab" data-view="observations">Observations</button>
-        <button class="tab" data-view="staff">Staff</button>
-        <button class="tab" data-view="intakes">Intakes</button>
-        <button class="tab" data-view="locations">Locations</button>
-        <button class="tab hidden" data-view="announcer" id="announcerTab">Announcer</button>
-      </div>
-
-      <section id="viewRoster">
-        <div class="card">
-          <div class="row">
-            <div class="pill">Time Blocks <span class="muted">(Date:</span> <span id="timeBlockDate"></span><span class="muted">)</span></div>
-            <div class="spacer"></div>
-            <div class="pill">Selected: <strong id="selectedBlock">None</strong></div>
+          <div class="row" style="margin-top:6px;">
+            <button class="secondary miniBtn" id="todayBtn" type="button">Today</button>
           </div>
-          <div class="blocks" id="timeBlocks"></div>
+        </div>
+        <div class="menuSection">
+          <label class="tiny">Roster Mode
+            <select id="rosterModeSelect">
+              <option value="mine">My Schedule</option>
+              <option value="all">Full Roster</option>
+            </select>
+          </label>
+        </div>
+        <div class="menuSection adminOnly" id="adminTools">
+          <label class="tiny">View as
+            <select id="qaRoleSelect">
+              <option value="">Actual role</option>
+              <option value="admin">Admin</option>
+              <option value="manager">Manager</option>
+              <option value="instructor">Instructor</option>
+              <option value="readonly">Readonly</option>
+            </select>
+          </label>
+          <label class="tiny">Layout preview
+            <select id="qaLayoutSelect">
+              <option value="auto">Auto</option>
+              <option value="phone">Phone</option>
+              <option value="tablet">Tablet</option>
+              <option value="desktop">Desktop</option>
+            </select>
+          </label>
+          <label class="tiny"><input type="checkbox" id="qaInternalToggle" /> Internal tools</label>
+          <div class="row" style="margin-top:6px;">
+            <button class="secondary miniBtn" id="commandPaletteBtn" type="button">Command palette</button>
+            <button class="secondary miniBtn" id="revBtn" type="button">Revision history</button>
+            <button class="secondary miniBtn" id="qaResetBtn" type="button">Reset UI</button>
+          </div>
+          <div class="hint" id="integrationStatus"></div>
+        </div>
+        <div class="menuSection">
+          <button class="secondary" id="logoutBtn">Log out</button>
+        </div>
+      </div>
+
+<section id="viewRoster" class="hidden">
+        <div class="card" id="rosterUploadCard">
+          <div class="row">
+            <div class="pill">Roster Upload</div>
+            <div class="spacer"></div>
+            <button class="secondary miniBtn" id="uploadConfirmBtn" type="button">Upload</button>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <input type="file" id="rosterFile" accept=".html,.htm" />
+            <div class="muted tiny" id="uploadHint">Uploads use the selected location.</div>
+          </div>
+          <div class="hint" id="rosterUploadStatus"></div>
+        </div>
+
+        <div class="card" id="timeBlockCard">
+          <div class="row">
+            <div class="pill">Time Blocks</div>
+            <div class="spacer"></div>
+            <button class="secondary miniBtn" id="timeBlockToggle" type="button">All times</button>
+          </div>
+          <div id="timeActive" class="time-active">No class selected</div>
+          <div id="timeBlocks" class="blocks hidden"></div>
+          <div class="hint" id="timeBlockStatus"></div>
         </div>
 
         <div class="card">
           <div class="row rosterToolbar">
-            <div class="pill">Roster <span id="rosterMeta" class="muted"></span></div>
-            <div class="legend" id="tagLegend">
-              <span class="legendItem"><span class="flagBadge on">⭐</span><span class="legendText">First time</span></span>
-              <span class="legendItem"><span class="flagBadge on">🔄</span><span class="legendText">Makeup</span></span>
-              <span class="legendItem"><span class="flagBadge on">📜</span><span class="legendText">Policy</span></span>
-              <span class="legendItem"><span class="flagBadge on">💳</span><span class="legendText">Balance</span></span>
-              <span class="legendItem"><span class="flagBadge on">🧪</span><span class="legendText">Trial</span></span>
-            </div>
-
+            <div class="pill">Roster</div>
             <div class="spacer"></div>
-
-            <button class="secondary miniBtn mobile-only" id="filtersToggle" type="button" aria-expanded="false">Filters</button>
-
-            <div id="filtersPanel" class="filters-panel">
-              <div class="searchWrap">
-                <input type="text" id="rosterSearch" class="searchInput" placeholder="Search roster..." />
-                <button class="searchClear hidden" id="searchClear" title="Clear search">✕</button>
-              </div>
-
-              <span class="pill">Sort</span>
-              <select id="sortBy">
-                <option value="instructor" selected>Instructor + A-Z</option>
-                <option value="name">Swimmer A-Z</option>
-              </select>
-
-              <span class="pill">Instructor</span>
-              <select id="instructorFilter"></select>
-            </div>
-          </div>
-
-          <div id="rosterActionDock" class="row roster-actions">
-            <button class="secondary miniBtn" id="addSwimmerBtn">+ Add swimmer</button>
-            <div id="bulkAttendanceActions" class="row" style="gap:6px;">
-              <button class="secondary miniBtn" id="bulkMarkPresent">✅ Mark all present</button>
-              <button class="secondary miniBtn" id="bulkClearAttendance">⭘ Clear all attendance</button>
-            </div>
+            <div class="saveStatus" id="rosterSaveStatus"></div>
           </div>
 
           <div class="table-scroll">
-            <table class="roster-table">
+            <table class="roster-table dense">
             <thead>
               <tr>
-                <th style="width:110px;">Attendance</th>
+                <th style="width:90px;">Attendance</th>
                 <th>Swimmer</th>
                 <th style="width:70px;">Age</th>
-                <th style="width:110px;">Type</th>
+                <th style="width:130px;">Type</th>
                 <th style="width:120px;">Level</th>
-                <th style="width:130px;">Instructor</th>
-                <th style="width:90px;">Zone</th>
-                <th style="width:80px;">Action</th>
+                <th style="width:150px;">Instructor</th>
+                <th style="width:70px;">Zone</th>
+                <th style="width:90px;">Notes</th>
               </tr>
             </thead>
             <tbody id="rosterTable"></tbody>
           </table>
           </div>
 
-          <div id="rosterEmpty" class="hint muted">Select a date to load roster.</div>
+          <div id="rosterEmpty" class="hint muted">Select a location and date to load roster.</div>
         </div>
       </section>
 
-
-      <section id="viewObservations" class="hidden">
+<section id="viewObservations" class="hidden">
         <div class="card">
           <div class="row">
             <div class="pill">Instructor Observation</div>
@@ -159,6 +189,11 @@
               </label>
               <label class="tiny">Instructor
                 <input id="obsInstructor" type="text" placeholder="Instructor name" />
+                <div class="muted tiny" id="obsInstructorMeta"></div>
+              </label>
+              <label class="tiny inline">
+                <input type="checkbox" id="obsInstructorOverride" />
+                <span>Override instructor</span>
               </label>
               <button class="secondary miniBtn" id="obsLoadRosterBtn">Load roster</button>
             </div>
@@ -201,10 +236,10 @@
             </div>
           </div>
           <form id="uploadForm" class="row" style="margin-top:8px;">
-            <input type="file" id="rosterFile" accept=".html,.htm" />
+            <input type="file" id="uploadRosterFile" accept=".html,.htm" />
             <button class="primary" type="submit">Upload</button>
           </form>
-          <div class="hint" id="uploadStatus"></div>
+          <div class="hint" id="uploadStatusUploads"></div>
         </div>
         <div class="card">
           <div class="row">
@@ -244,6 +279,7 @@
 
         <div class="card">
           <div class="row">
+            <button class="secondary miniBtn" id="printRetentionBtn" type="button">Print</button>
             <div class="pill">Instructor Retention</div>
           </div>
           <div id="retentionTable" class="list"></div>
@@ -251,6 +287,28 @@
       </section>
 
       <section id="viewStaff" class="hidden">
+        <div class="card" id="userAdminCard">
+          <div class="row">
+            <div class="pill">User Admin</div>
+            <div class="spacer"></div>
+            <span class="muted tiny">Admins only</span>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <input id="userAdminFirst" type="text" placeholder="First name" />
+            <input id="userAdminLast" type="text" placeholder="Last name" />
+            <input id="userAdminUsername" type="text" placeholder="Username" />
+            <select id="userAdminRole">
+              <option value="admin">Admin</option>
+              <option value="manager">Manager</option>
+              <option value="instructor">Instructor</option>
+              <option value="readonly">Read Only</option>
+            </select>
+            <div id="userAdminLocations" class="row"></div>
+            <button class="primary miniBtn" id="userAdminCreate" type="button">Create</button>
+          </div>
+          <div class="hint" id="userAdminStatus"></div>
+          <div id="userAdminList" class="list"></div>
+        </div>
         <div class="card">
           <div class="row">
             <div class="pill">Staff Directory</div>
@@ -274,6 +332,8 @@
         <div class="card">
           <div class="row">
             <div class="pill">Client Intakes</div>
+            <div class="spacer"></div>
+            <button class="secondary miniBtn" id="printIntakeBtn" type="button">Print</button>
             <select id="intakeStatusFilter">
               <option value="">All statuses</option>
               <option value="new">New</option>
@@ -300,6 +360,62 @@
         </div>
       </section>
 
+      <section id="viewActivity" class="hidden">
+        <div class="card">
+          <div class="row">
+            <div class="pill">System Activity</div>
+            <div class="spacer"></div>
+            <input type="text" id="activityUserInput" placeholder="User" list="activityUserList" />
+            <datalist id="activityUserList"></datalist>
+            <input type="date" id="activityFrom" />
+            <input type="date" id="activityTo" />
+            <div class="row" style="gap:6px;">
+              <button class="secondary miniBtn" id="activityPresetToday" type="button">Today</button>
+              <button class="secondary miniBtn" id="activityPreset7" type="button">Last 7 days</button>
+              <button class="secondary miniBtn" id="activityPresetWeek" type="button">This week</button>
+            </div>
+            <select id="activityFilter">
+              <option value="">All events</option>
+              <option value="attendance">Attendance</option>
+              <option value="admin_action">Admin actions</option>
+              <option value="roster_upload">Roster uploads</option>
+              <option value="report_upload">Report uploads</option>
+              <option value="observation">Observations</option>
+            </select>
+            <button class="secondary miniBtn" id="activitySaveViewBtn" type="button">Save view</button>
+            <button class="secondary miniBtn" id="activityRefresh" type="button">Refresh</button>
+            <button class="secondary miniBtn" id="activityClear" type="button">Clear filters</button>
+          </div>
+          <div class="hint" id="activityStatus"></div>
+          <div id="activitySavedViews" class="list"></div>
+          <div id="activityList" class="list"></div>
+
+        <div class="card hidden" id="lineageCard">
+          <div class="row">
+            <div class="pill">Inspector / Lineage</div>
+            <div class="spacer"></div>
+          </div>
+          <div class="row" style="margin-top:8px;">
+            <input type="text" id="lineageClassId" placeholder="Class instance ID" />
+            <button class="secondary miniBtn" id="lineageLoadBtn" type="button">Load</button>
+          </div>
+          <pre id="lineageOutput" class="code"></pre>
+        </div>
+
+        </div>
+      </section>
+
+
+      <section id="viewNotifications" class="hidden">
+        <div class="card">
+          <div class="row">
+            <div class="pill">Instructor Notifications</div>
+            <div class="spacer"></div>
+            <button class="secondary miniBtn" id="notificationsRefresh" type="button">Refresh</button>
+          </div>
+          <div id="notificationList" class="list"></div>
+        </div>
+      </section>
       <section id="viewAnnouncer" class="hidden">
         <div class="card">
           <div class="row">
@@ -311,8 +427,55 @@
         </div>
       </section>
     </div>
+  
+  <div id="commandPaletteModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 style="margin:0;">Command Palette</h3>
+        <div class="spacer"></div>
+        <button class="secondary miniBtn" id="commandPaletteClose" type="button">Close</button>
+      </div>
+      <input id="commandPaletteInput" type="text" placeholder="Type a command…" />
+      <div id="commandPaletteList" class="list"></div>
+    </div>
   </div>
 
+
+  <div id="changePinModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 style="margin:0;">Change PIN</h3>
+        <div class="spacer"></div>
+      </div>
+      <p class="muted tiny">You must update your PIN before continuing.</p>
+      <label class="tiny">New PIN
+        <input id="changePinNew" type="password" inputmode="numeric" maxlength="6" />
+      </label>
+      <label class="tiny">Confirm PIN
+        <input id="changePinConfirm" type="password" inputmode="numeric" maxlength="6" />
+      </label>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="changePinSave">Save PIN</button>
+      </div>
+      <div class="hint" id="changePinStatus"></div>
+    </div>
+  </div>
+
+  <div id="tourModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 id="tourTitle" style="margin:0;">Quick Tour</h3>
+        <div class="spacer"></div>
+        <label class="tiny"><input type="checkbox" id="tourDontShow" /> Don't show again</label>
+      </div>
+      <div class="hint" id="tourBody"></div>
+      <div class="row" style="margin-top:8px;">
+        <button class="secondary" id="tourSkip">Skip</button>
+        <div class="spacer"></div>
+        <button class="primary" id="tourNext">Next</button>
+      </div>
+    </div>
+  </div>
 
   <div id="rosterNoteModal" class="modal hidden">
     <div class="modal-card">
@@ -322,9 +485,30 @@
         <button class="secondary miniBtn" id="rosterNoteClose">Close</button>
       </div>
       <textarea id="rosterNoteText" placeholder="Add notes for this swimmer"></textarea>
+      <label class="tiny" style="display:flex;align-items:center;gap:6px;margin-top:6px;">
+        <input type="checkbox" id="noteInternalToggle" checked />
+        Internal only
+      </label>
       <div class="row" style="margin-top:8px;">
         <button class="primary" id="rosterNoteSave">Save</button>
         <button class="secondary" id="rosterNoteClear">Clear</button>
+        <button class="secondary" id="sspPassBtn">Passed SSP</button>
+      </div>
+      <div class="hint" id="sspStatus"></div>
+    </div>
+  </div>
+
+
+  <div id="uploadConfirmModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 style="margin:0;">Confirm Roster Upload</h3>
+        <div class="spacer"></div>
+        <button class="secondary miniBtn" id="uploadConfirmClose">Close</button>
+      </div>
+      <div class="hint" id="uploadConfirmSummary"></div>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="uploadConfirmRun">Confirm Upload</button>
       </div>
     </div>
   </div>
