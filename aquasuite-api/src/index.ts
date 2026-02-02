@@ -1445,6 +1445,33 @@ app.patch('/intakes/:id', async (req, reply) => {
   return { ok: true }
 })
 
+app.delete('/intakes/:id', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const intakeId = (req.params as any)?.id as string
+
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
+
+  const intake = await pool.query("SELECT id, location_id FROM client_intakes WHERE id=$1", [intakeId])
+  if (!intake.rowCount) return reply.code(404).send({ error: 'intake_not_found' })
+  const locationId = intake.rows[0].location_id
+  if (locationId) {
+    const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  await pool.query('BEGIN')
+  try {
+    await pool.query('DELETE FROM client_intake_activity WHERE intake_id=$1', [intakeId])
+    await pool.query('DELETE FROM client_intakes WHERE id=$1', [intakeId])
+    await pool.query('COMMIT')
+  } catch (err) {
+    await pool.query('ROLLBACK')
+    throw err
+  }
+
+  return { ok: true, deleted: intakeId }
+})
 app.get('/integrations/gmail/status', async (_req, reply) => {
   const res = await pool.query(
     `SELECT email, expires_at, last_received_at FROM gmail_oauth_tokens ORDER BY updated_at DESC LIMIT 1`
