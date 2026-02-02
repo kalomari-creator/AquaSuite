@@ -219,6 +219,13 @@ function showRevModal() {
     revContent.appendChild(row)
   })
   revModal.classList.remove('hidden')
+  revModal.style.pointerEvents = "auto"
+}
+
+function hideRevModal() {
+  if (!revModal) return
+  revModal.classList.add('hidden')
+  revModal.style.pointerEvents = "none"
 }
 
 function formatTime(time) {
@@ -232,13 +239,15 @@ function formatTime(time) {
 
 function setView(view) {
   state.view = view
-  ['roster','uploads','reports','observations','staff','intakes','locations','announcer'].forEach((v) => {
-    const panel = el(`view${v[0].toUpperCase()}${v.slice(1)}`)
-    if (panel) panel.classList.toggle('hidden', v !== view)
-  })
-  document.querySelectorAll('.page-tabs .tab').forEach((tab) => {
-    tab.classList.toggle('active', tab.dataset.view === view)
-  })
+  const views = ["roster","uploads","reports","observations","staff","intakes","locations","announcer"]
+  for (const v of views) {
+    const panel = el("view" + v[0].toUpperCase() + v.slice(1))
+    if (panel) panel.classList.toggle("hidden", v !== view)
+  }
+  const tabs = document.querySelectorAll(".page-tabs .tab")
+  for (const tab of tabs) {
+    tab.classList.toggle("active", tab.dataset.view === view)
+  }
 }
 
 function setRosterMode(mode) {
@@ -1255,10 +1264,10 @@ gmailConnectBtn.addEventListener('click', async () => {
 reportPreflightBtn?.addEventListener('click', runReportPreflight)
 reportUploadBtn?.addEventListener('click', uploadReport)
 revBtn.addEventListener('click', showRevModal)
-revClose.addEventListener('click', () => revModal.classList.add('hidden'))
-revModal.addEventListener('click', (e) => { if (e.target === revModal) revModal.classList.add('hidden') })
+revClose.addEventListener('click', hideRevModal)
+revModal.addEventListener('click', (e) => { if (e.target === revModal) hideRevModal() })
 document.addEventListener('DOMContentLoaded', () => {
-  if (revModal) revModal.classList.add('hidden')
+  hideRevModal()
 })
 
 async function bootstrap() {

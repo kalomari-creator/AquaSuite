@@ -39,7 +39,7 @@ body{
 
 .wrap{ max-width: 1250px; margin: 0 auto; }
 
-.hidden{ display:none; }
+.hidden{ display:none !important; }
 
 .topbar{
   display:flex;
@@ -193,6 +193,10 @@ textarea{
   align-items:center;
   justify-content:center;
   z-index:50;
+}
+.modal.hidden{
+  display:none !important;
+  pointer-events:none;
 }
 .modal-card{
   width:min(520px, 92vw);
