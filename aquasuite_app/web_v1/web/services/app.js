@@ -1257,6 +1257,9 @@ reportUploadBtn?.addEventListener('click', uploadReport)
 revBtn.addEventListener('click', showRevModal)
 revClose.addEventListener('click', () => revModal.classList.add('hidden'))
 revModal.addEventListener('click', (e) => { if (e.target === revModal) revModal.classList.add('hidden') })
+document.addEventListener('DOMContentLoaded', () => {
+  if (revModal) revModal.classList.add('hidden')
+})
 
 async function bootstrap() {
   loginPanel.classList.add('hidden')
