@@ -115,6 +115,10 @@
       </div>
 
 <section id="viewRoster" class="hidden">
+        <div class="tabs page-tabs" id="rosterTabs">
+          <button class="tab" data-subtab-btn="main">Roster</button>
+        </div>
+        <div data-subtab="main">
         <div class="card" id="rosterUploadCard">
           <div class="row">
             <div class="pill">Roster Upload</div>
@@ -134,7 +138,7 @@
           <div class="pill" id="homebaseShiftStatus">On shift: —</div>
           <div class="spacer"></div>
           <label class="tiny">Time
-            <select id="timeBlockSelect"></select>
+            <select id="timeBlockSelect" class="compact"></select>
           </label>
         </div>
           <div id="timeActive" class="time-active">No class selected</div>
@@ -215,6 +219,7 @@
             <div id="eodAlerts" class="list" style="margin-top:10px;"></div>
           </div>
         </div>
+      </div>
       </section>
 
 <section id="viewObservations" class="hidden">
@@ -223,13 +228,13 @@
             <div class="pill">Aquatics Staff Observation</div>
             <div class="spacer"></div>
             <div class="tabs" style="margin-top:0;">
-              <button class="tab active" id="obsFormTab" data-obs="form">Observation Form</button>
-              <button class="tab" id="obsDashTab" data-obs="dashboard">Observation Dashboard</button>
+              <button class="tab active" id="obsFormTab" data-obs="form" data-subtab-btn="form">Observation Form</button>
+              <button class="tab" id="obsDashTab" data-obs="dashboard" data-subtab-btn="dashboard">Observation Dashboard</button>
             </div>
           </div>
         </div>
 
-        <div id="obsFormPanel">
+        <div id="obsFormPanel" data-subtab="form">
           <div class="card">
             <div class="row">
               <label class="tiny">Class date
@@ -267,7 +272,7 @@
           </div>
         </div>
 
-        <div id="obsDashboardPanel" class="hidden">
+        <div id="obsDashboardPanel" class="hidden" data-subtab="dashboard">
           <div class="card">
             <div class="row">
               <div class="pill">Observation Dashboard</div>
@@ -414,6 +419,7 @@
         </div>
 
         <div class="tabs page-tabs" id="reportsTabs">
+          <button class="tab" data-subtab-btn="index">All Reports</button>
           <button class="tab" data-subtab-btn="enrollment-tracker">Enrollment Tracker</button>
           <button class="tab" data-subtab-btn="instructor-retention">Aquatics Staff Retention</button>
           <button class="tab" data-subtab-btn="aged-accounts">Aged Accounts</button>
@@ -422,6 +428,21 @@
           <button class="tab" data-subtab-btn="roster-health">Roster Health</button>
         </div>
 
+        <div data-subtab="index">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Choose a report</div>
+            </div>
+            <div class="upload-grid" style="margin-top:8px;">
+              <button class="secondary" data-subtab-link="enrollment-tracker" type="button">Enrollment Tracker</button>
+              <button class="secondary" data-subtab-link="instructor-retention" type="button">Aquatics Staff Retention</button>
+              <button class="secondary" data-subtab-link="aged-accounts" type="button">Aged Accounts</button>
+              <button class="secondary" data-subtab-link="drop-list" type="button">Drop List</button>
+              <button class="secondary" data-subtab-link="contacts" type="button">Contacts</button>
+              <button class="secondary" data-subtab-link="roster-health" type="button">Roster Health</button>
+            </div>
+          </div>
+        </div>
         <div data-subtab="enrollment-tracker">
           <div class="card report-card">
             <div class="row">
@@ -459,6 +480,20 @@
             </div>
             <canvas id="enrollmentChart"></canvas>
             <div id="enrollmentTable" class="list"></div>
+            <div class="grid2" style="margin-top:10px;">
+              <div class="card">
+                <div class="row"><div class="pill">By Location</div></div>
+                <div id="enrollmentByLocation" class="list"></div>
+              </div>
+              <div class="card">
+                <div class="row"><div class="pill">By Aquatics Staff</div></div>
+                <div id="enrollmentByStaff" class="list"></div>
+              </div>
+            </div>
+            <div class="card" style="margin-top:10px;">
+              <div class="row"><div class="pill">Work Queue</div></div>
+              <div id="enrollmentWorkQueue" class="list"></div>
+            </div>
           </div>
         </div>
 
@@ -708,6 +743,11 @@
       </section>
 
       <section id="viewActivity" class="hidden">
+        <div class="tabs page-tabs" id="activityTabs">
+          <button class="tab" data-subtab-btn="activity-feed">System Activity</button>
+          <button class="tab" data-subtab-btn="billing-queue">Billing Queue</button>
+        </div>
+        <div data-subtab="billing-queue">
         <div class="card" id="billingQueueCard">
           <div class="row">
             <div class="pill">Billing Queue</div>
@@ -724,6 +764,8 @@
           </div>
           <div id="billingQueueList" class="list"></div>
         </div>
+        </div>
+        <div data-subtab="activity-feed">
         <div class="card">
           <div class="row">
             <div class="pill">System Activity</div>
@@ -766,6 +808,7 @@
         </div>
 
         </div>
+      </div>
       </section>
 
 
@@ -796,6 +839,10 @@
         </div>
       </section>
       <section id="viewAnnouncer" class="hidden">
+        <div class="tabs page-tabs" id="announcerTabs">
+          <button class="tab" data-subtab-btn="announcer">Announcer</button>
+        </div>
+        <div data-subtab="announcer">
         <div class="card">
           <div class="row">
             <div class="pill">Announcer (Westchester)</div>
@@ -804,6 +851,7 @@
           </div>
           <div class="hint">Announcer controls are enabled for Westchester only. Audio routing is handled on the server.</div>
         </div>
+      </div>
       </section>
     </div>
     </div>
@@ -869,6 +917,8 @@
         <input type="checkbox" id="noteInternalToggle" checked />
         Internal only
       </label>
+      <textarea id="sspNoteInput" placeholder="SSP note (optional)"></textarea>
+      <div class="list" id="sspHistoryList"></div>
       <div class="row" style="margin-top:8px;">
         <button class="primary" id="rosterNoteSave">Save</button>
         <button class="secondary" id="rosterNoteClear">Clear</button>
@@ -877,6 +927,42 @@
         <button class="secondary" id="billingFlagBtn">Billing Flag</button>
       </div>
       <div class="hint" id="sspStatus"></div>
+    </div>
+  </div>
+
+  <div id="billingModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 style="margin:0;">Billing Ticket</h3>
+        <div class="spacer"></div>
+        <button class="secondary miniBtn" id="billingCancelBtn">Close</button>
+      </div>
+      <input id="billingReasonInput" type="text" placeholder="Reason" />
+      <textarea id="billingNotesInput" placeholder="Internal notes"></textarea>
+      <div class="row" style="margin-top:8px;">
+        <label class="tiny">Priority
+          <select id="billingPrioritySelect" class="compact">
+            <option value="low">Low</option>
+            <option value="med" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        <label class="tiny">Status
+          <select id="billingStatusSelect" class="compact">
+            <option value="open" selected>Open</option>
+            <option value="in_progress">In progress</option>
+            <option value="waiting_customer">Waiting customer</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </label>
+        <label class="tiny">Assign to
+          <select id="billingAssigneeSelect" class="compact"></select>
+        </label>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="billingSaveBtn">Create Ticket</button>
+      </div>
     </div>
   </div>
 

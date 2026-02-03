@@ -26,12 +26,16 @@ const state = {
   classInstances: [],
   activityEvents: [],
   subtabs: {
+    roster: 'main',
     uploads: 'daily-roster',
-    reports: 'enrollment-tracker',
+    reports: 'index',
+    observations: 'form',
     staff: 'staff-list',
     intakes: 'google-intakes',
     locations: 'location-list',
-    notifications: 'general'
+    activity: 'activity-feed',
+    notifications: 'general',
+    announcer: 'announcer'
   },
   contacts: [],
   contactDuplicates: [],
@@ -133,6 +137,9 @@ const sspChartEl = el('sspChart')
 const sspTable = el('sspTable')
 const sspExportBtn = el('sspExportBtn')
 const enrollmentChartEl = el('enrollmentChart')
+const enrollmentByLocation = el('enrollmentByLocation')
+const enrollmentByStaff = el('enrollmentByStaff')
+const enrollmentWorkQueue = el('enrollmentWorkQueue')
 const enrollmentTable = el('enrollmentTable')
 const enrollmentExportBtn = el('enrollmentExportBtn')
 const retentionChartEl = el('retentionChart')
@@ -177,6 +184,17 @@ const sspPassBtn = el('sspPassBtn')
 const sspRevokeBtn = el('sspRevokeBtn')
 const billingFlagBtn = el('billingFlagBtn')
 const sspStatus = el('sspStatus')
+const sspNoteInput = el('sspNoteInput')
+const sspHistoryList = el('sspHistoryList')
+
+const billingModal = el('billingModal')
+const billingReasonInput = el('billingReasonInput')
+const billingNotesInput = el('billingNotesInput')
+const billingPrioritySelect = el('billingPrioritySelect')
+const billingStatusSelect = el('billingStatusSelect')
+const billingAssigneeSelect = el('billingAssigneeSelect')
+const billingSaveBtn = el('billingSaveBtn')
+const billingCancelBtn = el('billingCancelBtn')
 const addSwimmerModal = el('addSwimmerModal')
 const addSwimmerClose = el('addSwimmerClose')
 const addSwimmerSave = el('addSwimmerSave')
@@ -776,14 +794,188 @@ function formatTime(time) {
   return `${h12}:${mm} ${suffix}`
 }
 
+
+function closeCommandPalette() {
+  if (!commandPaletteModal) return
+  commandPaletteModal.classList.add('hidden')
+  commandPaletteModal.style.pointerEvents = 'none'
+}
+
+function getRosterNoteKey(entryId) {
+  return `roster_note_${entryId}`
+}
+
+async function loadSspHistory(entryId) {
+  if (!sspHistoryList || !entryId || !state.locationId) return
+  sspHistoryList.innerHTML = '<div class="hint">Loading SSP history…</div>'
+  try {
+    const data = await apiFetch(`/ssp/events?locationId=${state.locationId}&rosterEntryId=${entryId}`)
+    const events = Array.isArray(data.events) ? data.events : []
+    if (!events.length) {
+      sspHistoryList.innerHTML = '<div class="hint">No SSP history yet.</div>'
+      return
+    }
+    sspHistoryList.innerHTML = ''
+    events.forEach((evt) => {
+      const item = document.createElement('div')
+      item.className = 'list-item'
+      item.innerHTML = `<strong>${evt.status || ''}</strong>
+        <div class="muted tiny">${evt.created_at ? new Date(evt.created_at).toLocaleString() : ''}</div>
+        <div class="muted tiny">${evt.note || ''}</div>`
+      sspHistoryList.appendChild(item)
+    })
+  } catch {
+    sspHistoryList.innerHTML = '<div class="hint">No SSP history yet.</div>'
+  }
+}
+
+async function openEntityNote(entityType, entityId) {
+  state.noteEntityType = entityType
+  state.noteEntityId = entityId
+  state.rosterNoteEntryId = null
+  rosterNoteText.value = ''
+  if (sspStatus) sspStatus.textContent = ''
+  if (sspNoteInput) sspNoteInput.value = ''
+  if (sspHistoryList) sspHistoryList.innerHTML = ''
+  if (sspRevokeBtn) sspRevokeBtn.classList.add('hidden')
+  rosterNoteModal.classList.remove('hidden')
+  rosterNoteModal.style.pointerEvents = 'auto'
+  if (entityType === 'roster_entry') {
+    loadSspHistory(entityId)
+    const entry = (state.rosterEntries || []).find((r) => r.id === entityId)
+    if (entry?.ssp_passed) {
+      if (sspStatus) sspStatus.textContent = 'SSP passed'
+      if (sspRevokeBtn) sspRevokeBtn.classList.remove('hidden')
+    } else {
+      if (sspStatus) sspStatus.textContent = 'SSP not passed'
+    }
+  }
+  try {
+    const data = await apiFetch(`/notes?entityType=${entityType}&entityId=${entityId}&locationId=${state.locationId}`)
+    const noteObj = (data.notes && data.notes[0]) ? data.notes[0] : null
+    const note = noteObj ? noteObj.note : ''
+    rosterNoteText.value = note || ''
+    if (noteInternalToggle) noteInternalToggle.checked = noteObj ? !!noteObj.is_internal : true
+  } catch {
+    // no-op
+  }
+}
+
+function openRosterNote(entryId) {
+  state.rosterNoteEntryId = entryId
+  openEntityNote('roster_entry', entryId)
+}
+
+function closeRosterNote() {
+  rosterNoteModal.classList.add('hidden')
+  rosterNoteModal.style.pointerEvents = 'none'
+  state.rosterNoteEntryId = null
+  state.noteEntityId = null
+}
+
+async function saveRosterNote() {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  if (!entryId) return
+  const value = rosterNoteText.value || ''
+  const isInternal = noteInternalToggle ? !!noteInternalToggle.checked : true
+  try {
+    await apiFetch('/notes', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        entityType: state.noteEntityType || 'roster_entry',
+        entityId: entryId,
+        note: value,
+        isInternal
+      })
+    })
+  } catch {
+    localStorage.setItem(getRosterNoteKey(entryId), value)
+  }
+  closeRosterNote()
+  renderRoster()
+}
+
+function clearRosterNote() {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  if (!entryId) return
+  localStorage.removeItem(getRosterNoteKey(entryId))
+  rosterNoteText.value = ''
+  renderRoster()
+}
+
+async function markSspPassed() {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  if (!entryId || !state.locationId) return
+  if (sspStatus) sspStatus.textContent = 'Saving SSP…'
+  try {
+    const cls = getSelectedClassInstance()
+    await apiFetch('/ssp/pass', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        rosterEntryId: entryId,
+        classInstanceId: cls?.id || null,
+        note: sspNoteInput?.value || null
+      })
+    })
+    if (sspStatus) sspStatus.textContent = 'SSP recorded ✓'
+    if (sspNoteInput) sspNoteInput.value = ''
+    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+    const entry = rosterEntries.find((r) => r.id === entryId)
+    if (entry) entry.ssp_passed = true
+    renderRoster()
+    loadNotifications()
+    loadSspHistory(entryId)
+  } catch (err) {
+    if (sspStatus) sspStatus.textContent = err?.error || 'SSP failed'
+  }
+}
+
+async function markSspRevoked() {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  if (!entryId || !state.locationId) return
+  if (sspStatus) sspStatus.textContent = 'Revoking SSP…'
+  try {
+    const cls = getSelectedClassInstance()
+    await apiFetch('/ssp/revoke', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        rosterEntryId: entryId,
+        classInstanceId: cls?.id || null,
+        note: sspNoteInput?.value || null
+      })
+    })
+    if (sspStatus) sspStatus.textContent = 'SSP revoked'
+    if (sspNoteInput) sspNoteInput.value = ''
+    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+    const entry = rosterEntries.find((r) => r.id === entryId)
+    if (entry) entry.ssp_passed = false
+    renderRoster()
+    loadNotifications()
+    loadSspHistory(entryId)
+  } catch (err) {
+    if (sspStatus) sspStatus.textContent = err?.error || 'SSP revoke failed'
+  }
+}
+
 function setView(view, options = {}) {
   state.view = view
+  if (view === 'roster' && state.locationId === 'all') {
+    const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
+    if (first) {
+      state.locationId = first.id
+      if (locationSelect) locationSelect.value = first.id
+      localStorage.setItem(locationPrefKey, first.id)
+    }
+  }
   const views = ["roster","uploads","reports","observations","staff","intakes","locations","activity","notifications","announcer"]
   for (const v of views) {
     const panel = el("view" + v[0].toUpperCase() + v.slice(1))
     if (panel) panel.classList.toggle("hidden", v !== view)
   }
-  document.querySelectorAll('.navItem').forEach((btn) => {
+document.querySelectorAll('.navItem').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.view === view)
   })
   closeGearMenu()
@@ -816,8 +1008,17 @@ function setSubtab(view, subtab, options = {}) {
 function activateView(view) {
   if (view === 'uploads') loadUploads()
   if (view === 'reports') loadReports()
-  if (view === 'observations') { setObsTab('form'); loadObservationClasses(); renderObservationSwimmers() }
-  if (view === 'activity') { loadActivityFeed(); loadBillingTickets() }
+  if (view === 'observations') {
+    const tab = state.subtabs.observations || 'form'
+    setObsTab(tab)
+    if (tab === 'dashboard') loadObservationDashboard()
+    else { loadObservationClasses(); renderObservationSwimmers() }
+  }
+  if (view === 'activity') {
+    const tab = state.subtabs.activity || 'activity-feed'
+    if (tab === 'billing-queue') loadBillingTickets()
+    else loadActivityFeed()
+  }
   if (view === 'staff') { loadStaff(); loadInstructorVariants() }
   if (view === 'intakes') loadIntakes()
   if (view === 'locations') { renderLocationAdmin(); loadIntegrationStatus() }
@@ -832,9 +1033,18 @@ function activateSubtab(view, subtab) {
   if (view === 'intakes') loadIntakes()
   if (view === 'locations') renderLocationAdmin()
   if (view === 'notifications') loadNotifications()
+  if (view === 'observations') {
+    setObsTab(subtab || 'form')
+    if (subtab === 'dashboard') loadObservationDashboard()
+    else { loadObservationClasses(); renderObservationSwimmers() }
+  }
+  if (view === 'activity') {
+    if (subtab === 'billing-queue') loadBillingTickets()
+    else loadActivityFeed()
+  }
 }
 
-function parseRouteHash() {
+function parseRouteHash() {() {
   const hash = (location.hash || '').replace(/^#/, '')
   if (!hash) return null
   const cleaned = hash.replace(/^\//, '')
@@ -910,7 +1120,7 @@ async function loadLocations() {
   unique.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
   const isAdmin = getEffectiveRoleKey() === 'admin'
   if (isAdmin) {
-    unique.unshift({ id: 'all', name: 'Global / All Locations', code: 'ALL', state: 'ALL', features: { roster_enabled: true } })
+    unique.unshift({ id: 'all', name: 'Global / All Locations', code: 'ALL', state: 'ALL', features: { roster_enabled: true, reports_enabled: true, observations_enabled: true } })
   }
   state.locations = unique
   locationSelect.innerHTML = ""
@@ -1621,7 +1831,15 @@ function renderRoster() {
   }
   rosterEmpty.classList.add('hidden')
 
-  state.filteredEntries.forEach((entry) => {
+  const seen = new Set()
+  const entries = state.filteredEntries.filter((entry) => {
+    const key = String(entry.swimmer_external_id || entry.swimmer_name || entry.id || '').toLowerCase()
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+  entries.forEach((entry) => {
     const tr = document.createElement('tr')
     tr.className = 'roster-row'
     if (entry.attendance_auto_absent) tr.classList.add('auto-absent')
@@ -1629,6 +1847,7 @@ function renderRoster() {
     if (entry.attendance === 0) tr.classList.add('absent')
 
         const attendanceCell = document.createElement('td')
+    attendanceCell.className = 'col-attendance'
     attendanceCell.dataset.label = 'Attendance'
     const attendanceWrap = document.createElement('div')
     attendanceWrap.className = 'attendance-btns'
@@ -1647,7 +1866,13 @@ function renderRoster() {
     attendanceCell.appendChild(attendanceWrap)
 
     const swimmerCell = document.createElement('td')
+    swimmerCell.className = 'col-swimmer'
     swimmerCell.dataset.label = 'Swimmer'
+    const swimmerWrap = document.createElement('div')
+    swimmerWrap.className = 'cell-stack'
+    const nameLine = document.createElement('div')
+    nameLine.innerHTML = `<strong>${entry.swimmer_name || ''}</strong>`
+
     const flags = []
     if (entry.flag_first_time) flags.push('⭐')
     if (entry.flag_makeup) flags.push('🔄')
@@ -1658,36 +1883,57 @@ function renderRoster() {
     const flagHtml = flags.map((f) => `<span class="flag-chip">${f}</span>`).join('')
     const localBadge = entry.local_only ? '<span class="flag-chip">Local</span>' : ''
     const locationBadge = entry.location_name ? `<span class="flag-chip">${entry.location_name}</span>` : ''
-    swimmerCell.innerHTML = `<div><strong>${entry.swimmer_name || ''}</strong></div><div>${flagHtml}${localBadge}${locationBadge}</div>`
+    const badgeLine = document.createElement('div')
+    badgeLine.className = 'cell-sub'
+    badgeLine.innerHTML = `${flagHtml}${localBadge}${locationBadge}`
+
+    swimmerWrap.appendChild(nameLine)
+    if (flagHtml || localBadge || locationBadge) swimmerWrap.appendChild(badgeLine)
+    swimmerCell.appendChild(swimmerWrap)
 
     const ageCell = document.createElement('td')
+    ageCell.className = 'col-age'
     ageCell.dataset.label = 'Age'
     ageCell.textContent = entry.age_text || ''
 
     const programCell = document.createElement('td')
+    programCell.className = 'col-type'
     programCell.dataset.label = 'Type'
     programCell.textContent = entry.program || entry.class_name || ''
 
     const levelCell = document.createElement('td')
+    levelCell.className = 'col-level'
     levelCell.dataset.label = 'Level'
     levelCell.textContent = entry.level || ''
 
     const instructorCell = document.createElement('td')
-    instructorCell.dataset.label = 'Instructor'
+    instructorCell.className = 'col-instructor'
+    instructorCell.dataset.label = 'Aquatics Staff'
     const actualRaw = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || ''
     const scheduledRaw = entry.scheduled_instructor || ''
     const actual = normalizeInstructorName(actualRaw)
     const scheduled = normalizeInstructorName(scheduledRaw)
     const isSub = entry.is_sub && scheduled && actual && actual !== scheduled
-    instructorCell.innerHTML = isSub
-      ? `<div><strong>${actual}</strong></div><div class="muted tiny">Scheduled: ${scheduled}</div>`
-      : `<div><strong>${actual}</strong></div>`
+    const instructorWrap = document.createElement('div')
+    instructorWrap.className = 'cell-stack'
+    const primaryLine = document.createElement('div')
+    primaryLine.innerHTML = `<strong>${actual || scheduled || '—'}</strong>`
+    instructorWrap.appendChild(primaryLine)
+    if (isSub) {
+      const subLine = document.createElement('div')
+      subLine.className = 'cell-sub'
+      subLine.textContent = `Scheduled: ${scheduled}`
+      instructorWrap.appendChild(subLine)
+    }
+    instructorCell.appendChild(instructorWrap)
 
     const zoneCell = document.createElement('td')
+    zoneCell.className = 'col-zone'
     zoneCell.dataset.label = 'Zone'
     zoneCell.textContent = entry.zone ? `Zone ${entry.zone}` : '—'
 
     const notesCell = document.createElement('td')
+    notesCell.className = 'col-notes'
     notesCell.dataset.label = 'Notes'
     const noteBtn = document.createElement('button')
     noteBtn.className = 'secondary miniBtn'
@@ -1702,6 +1948,7 @@ function renderRoster() {
     }
 
     const actionsCell = document.createElement('td')
+    actionsCell.className = 'col-actions'
     actionsCell.dataset.label = 'Actions'
     const canBilling = getEffectiveRoleKey() === 'admin' || getEffectiveRoleKey() === 'manager'
     if (canBilling) {
@@ -2130,12 +2377,15 @@ function renderActivityFeed() {
 async function loadBillingTickets() {
   if (!billingQueueList) return
   const role = getEffectiveRoleKey()
-  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  const locationId = role === 'admin' ? 'all' : state.locationId
   if (!locationId) {
     billingQueueList.innerHTML = '<div class="hint">Select a location to view billing tickets.</div>'
     return
   }
   billingQueueList.innerHTML = '<div class="hint">Loading billing tickets…</div>'
+  if (!state.staff || !state.staff.length) {
+    try { await loadStaff() } catch {}
+  }
   try {
     const params = new URLSearchParams()
     params.set('locationId', locationId)
@@ -2150,424 +2400,79 @@ async function loadBillingTickets() {
 function renderBillingTickets(tickets) {
   if (!billingQueueList) return
   billingQueueList.innerHTML = ''
-  if (!tickets.length) {
+  const items = Array.isArray(tickets) ? tickets : []
+  if (!items.length) {
     billingQueueList.innerHTML = '<div class="hint">No billing tickets.</div>'
     return
   }
-  tickets.forEach((t) => {
+
+  const staff = Array.isArray(state.staff) ? state.staff : []
+
+  items.forEach((t) => {
     const item = document.createElement('div')
     item.className = 'list-item'
     item.innerHTML = `<strong>${t.reason || 'Billing ticket'}</strong>
-      <div class="muted tiny">${t.status || ''} • ${t.priority || ''} • ${t.location_name || ''}</div>`
+      <div class="muted tiny">${t.location_name || ''} • ${t.status || 'open'} • Priority ${t.priority || 'med'}</div>
+      <div class="muted tiny">Created ${t.created_at ? new Date(t.created_at).toLocaleString() : ''}</div>`
+
+    const statusSelect = document.createElement('select')
+    ;['open','in_progress','waiting_customer','resolved','closed'].forEach((status) => {
+      const opt = document.createElement('option')
+      opt.value = status
+      opt.textContent = status.replace('_', ' ')
+      if (t.status === status) opt.selected = true
+      statusSelect.appendChild(opt)
+    })
+
+    const prioritySelect = document.createElement('select')
+    ;['low','med','high'].forEach((prio) => {
+      const opt = document.createElement('option')
+      opt.value = prio
+      opt.textContent = prio
+      if (t.priority === prio) opt.selected = true
+      prioritySelect.appendChild(opt)
+    })
+
+    const assigneeSelect = document.createElement('select')
+    const unassigned = document.createElement('option')
+    unassigned.value = ''
+    unassigned.textContent = 'Unassigned'
+    assigneeSelect.appendChild(unassigned)
+    staff.forEach((s) => {
+      const opt = document.createElement('option')
+      opt.value = s.id
+      opt.textContent = `${s.first_name || ''} ${s.last_name || ''}`.trim()
+      if (t.assigned_to_user_id === s.id) opt.selected = true
+      assigneeSelect.appendChild(opt)
+    })
+
+    const notes = document.createElement('textarea')
+    notes.placeholder = 'Internal notes'
+    notes.value = t.internal_notes || ''
+
+    const saveBtn = document.createElement('button')
+    saveBtn.className = 'secondary miniBtn'
+    saveBtn.textContent = 'Update'
+    saveBtn.addEventListener('click', async () => {
+      await apiFetch(`/billing/tickets/${t.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: statusSelect.value,
+          priority: prioritySelect.value,
+          assignedToUserId: assigneeSelect.value || null,
+          internalNotes: notes.value || null
+        })
+      })
+      loadBillingTickets()
+    })
+
+    item.appendChild(statusSelect)
+    item.appendChild(prioritySelect)
+    item.appendChild(assigneeSelect)
+    item.appendChild(notes)
+    item.appendChild(saveBtn)
     billingQueueList.appendChild(item)
   })
-}
-
-async function loadNotifications() {
-  await loadNotificationsByChannel('general')
-  await loadNotificationsByChannel('manager')
-}
-
-async function loadNotificationsByChannel(channel) {
-  const list = channel === 'manager' ? managerNotificationList : notificationList
-  if (!list) return
-  const role = getEffectiveRoleKey()
-  if (channel === 'manager' && !(role === 'admin' || role === 'manager')) {
-    list.innerHTML = '<div class="hint">Manager notifications are restricted.</div>'
-    return
-  }
-  list.innerHTML = '<div class="hint">Loading notifications…</div>'
-  try {
-    const params = new URLSearchParams()
-    if (state.locationId) params.set('locationId', state.locationId)
-    else if (role === 'admin') params.set('locationId', 'all')
-    params.set('channel', channel)
-    const data = await apiFetch(`/notifications?${params.toString()}`)
-    renderNotifications(list, data.notifications || [])
-  } catch (err) {
-    list.innerHTML = `<div class="hint">${err?.error || 'Failed to load notifications.'}</div>`
-  }
-}
-
-function renderNotifications(list, items) {
-  if (!list) return
-  list.innerHTML = ''
-  if (!items.length) {
-    list.innerHTML = '<div class="hint">No notifications yet.</div>'
-    return
-  }
-  items.forEach((n) => {
-    const row = document.createElement('div')
-    row.className = 'list-item'
-    row.innerHTML = `<strong>${n.title || 'Notification'}</strong>
-      <div class="muted tiny">${n.body || n.message || ''}</div>
-      <div class="muted tiny">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>`
-    if (!n.read_at && n.id) {
-      const markBtn = document.createElement('button')
-      markBtn.className = 'secondary miniBtn'
-      markBtn.textContent = 'Mark read'
-      markBtn.addEventListener('click', async () => {
-        try {
-          await apiFetch('/notifications/read', {
-            method: 'POST',
-            body: JSON.stringify({ notificationId: n.id })
-          })
-          row.classList.add('muted')
-        } catch {
-          // ignore
-        }
-      })
-      row.appendChild(markBtn)
-    }
-    list.appendChild(row)
-  })
-}
-
-function loadSavedViews() {
-  try {
-    const raw = localStorage.getItem(savedViewsKey)
-    return raw ? JSON.parse(raw) : []
-  } catch {
-    return []
-  }
-}
-
-function saveSavedViews(list) {
-  localStorage.setItem(savedViewsKey, JSON.stringify(list))
-}
-
-function getRosterViewState() {
-  return {
-    locationId: state.locationId,
-    date: state.date,
-    rosterMode: state.rosterMode,
-    selectedBlock: state.selectedBlock,
-    instructor: instructorFilter?.value || '',
-    search: rosterSearch?.value || '',
-    sortBy: sortBy?.value || ''
-  }
-}
-
-function getActivityViewState() {
-  const filters = readActivityFilters()
-  return { locationId: state.locationId, ...filters }
-}
-
-function renderSavedViews(viewKey) {
-  const list = loadSavedViews().filter((v) => v.viewKey == viewKey)
-  const container = viewKey == 'activity' ? activitySavedViews : rosterSavedViews
-  if (!container) return
-  container.innerHTML = ''
-  if (!list.length) {
-    container.innerHTML = '<div class="hint">No saved views.</div>'
-    return
-  }
-  list.forEach((v) => {
-    const row = document.createElement('div')
-    row.className = 'list-item'
-    const title = document.createElement('div')
-    title.innerHTML = `<strong>${v.name}</strong> <span class="muted tiny">${v.locationId ? '• location set' : ''}</span>`
-    const actions = document.createElement('div')
-    actions.className = 'row'
-    const applyBtn = document.createElement('button')
-    applyBtn.className = 'secondary miniBtn'
-    applyBtn.textContent = 'Apply'
-    applyBtn.addEventListener('click', () => applySavedView(v))
-    const delBtn = document.createElement('button')
-    delBtn.className = 'secondary miniBtn'
-    delBtn.textContent = 'Delete'
-    delBtn.addEventListener('click', () => {
-      const updated = loadSavedViews().filter((x) => x.id != v.id)
-      saveSavedViews(updated)
-      renderSavedViews(viewKey)
-      renderCommandPalette()
-    })
-    actions.appendChild(applyBtn)
-    actions.appendChild(delBtn)
-    row.appendChild(title)
-    row.appendChild(actions)
-    container.appendChild(row)
-  })
-}
-
-function applySavedView(view) {
-  if (view.locationId && view.locationId != state.locationId) {
-    state.locationId = view.locationId
-    if (locationSelect) locationSelect.value = view.locationId
-  }
-  if (view.viewKey == 'activity') {
-    setView('activity')
-    applyActivityFilters(view.filters || {})
-    ensureActivityDefaultDates()
-    loadActivityFeed()
-    return
-  }
-  if (view.viewKey == 'roster') {
-    setView('roster')
-    if (view.filters?.date) state.date = view.filters.date
-    if (view.filters?.rosterMode) state.rosterMode = view.filters.rosterMode
-    if (view.filters?.selectedBlock) {
-      state.selectedBlock = view.filters.selectedBlock
-      state.showAllTimes = false
-    } else {
-      state.selectedBlock = null
-      state.showAllTimes = true
-    }
-    if (sortBy && view.filters?.sortBy) sortBy.value = view.filters.sortBy
-    if (instructorFilter && view.filters?.instructor) instructorFilter.value = view.filters.instructor
-    if (rosterSearch && view.filters?.search) rosterSearch.value = view.filters.search
-    void loadRosterEntries()
-  }
-}
-
-function saveCurrentView(viewKey) {
-  const name = prompt('Name this view')
-  if (!name) return
-  const list = loadSavedViews()
-  const view = {
-    id: `${viewKey}-${Date.now()}`,
-    name,
-    viewKey,
-    locationId: state.locationId,
-    filters: viewKey == 'activity' ? getActivityViewState() : getRosterViewState()
-  }
-  list.push(view)
-  saveSavedViews(list)
-  renderSavedViews(viewKey)
-  renderCommandPalette()
-}
-
-let paletteIndex = 0
-let paletteItems = []
-
-function buildPaletteCommands() {
-  const role = getEffectiveRoleKey()
-  const locs = Array.isArray(state.locations) ? state.locations : []
-  const commands = []
-  const add = (label, action) => commands.push({ label, action })
-  add('Roster', () => setView('roster'))
-  add('Uploads', () => setView('uploads'))
-  add('Reports', () => { setView('reports'); loadReports() })
-  add('Observations', () => setView('observations'))
-  add('Staff', () => setView('staff'))
-  add('Intakes', () => setView('intakes'))
-  add('Locations', () => setView('locations'))
-  if (role == 'admin') add('Activity feed', () => setView('activity'))
-  const loc = state.locations.find((l) => l.id === state.locationId)
-  const features = getLocationFeatures(loc)
-  if (features.announcer_enabled) add('Announcer', () => setView('announcer'))
-
-  add('Roster today', () => { state.date = new Date().toISOString().slice(0,10); void loadRosterEntries(); setView('roster') })
-
-  locs.forEach((loc) => {
-    const key = (loc.state || loc.code || '').toString().toUpperCase()
-    if (key) {
-      add(`Roster ${key} today`, () => {
-        state.locationId = loc.id
-        if (locationSelect) locationSelect.value = loc.id
-        state.date = new Date().toISOString().slice(0,10)
-        void loadRosterEntries()
-        setView('roster')
-      })
-    }
-  })
-
-  add('Activity feed last 7 days', () => {
-    if (role != 'admin') return
-    const now = new Date(); const past = new Date(); past.setDate(now.getDate()-6)
-    if (activityFrom) activityFrom.value = formatDateInputValue(past)
-    if (activityTo) activityTo.value = formatDateInputValue(now)
-    setView('activity')
-    loadActivityFeed()
-  })
-
-  add('Open End of Day Close', () => { setView('roster'); eodCloseCard?.scrollIntoView({ behavior: 'smooth' }) })
-
-  // saved views
-  loadSavedViews().forEach((v) => {
-    add(`Saved view: ${v.name}`, () => applySavedView(v))
-  })
-
-  return commands
-}
-
-function renderCommandPalette() {
-  if (!commandPaletteList) return
-  const query = (commandPaletteInput?.value || '').toLowerCase().trim()
-  const all = buildPaletteCommands()
-  let filtered = !query ? all : all.filter((c) => c.label.toLowerCase().includes(query))
-
-  if (query.startsWith('instructor:') || query.startsWith('instructor ')) {
-    const name = query.replace('instructor:', '').replace('instructor ', '').trim()
-    if (name) {
-      filtered = filtered.concat([{ label: `Instructor: ${name}`, action: () => { setView('staff'); if (staffSearch) { staffSearch.value = name; renderStaffList() } } }])
-    }
-  }
-
-  if (query.startsWith('class:') || query.startsWith('class ')) {
-    const id = query.replace('class:', '').replace('class ', '').trim()
-    if (id) {
-      filtered = filtered.concat([{ label: `Class: ${id}`, action: () => { setView('roster'); if (rosterSearch) { rosterSearch.value = id; applyFilters() } } }])
-    }
-  }
-
-  paletteItems = filtered
-  paletteIndex = 0
-  commandPaletteList.innerHTML = ''
-  if (!filtered.length) {
-    commandPaletteList.innerHTML = '<div class="hint">No commands found.</div>'
-    return
-  }
-  filtered.forEach((cmd, idx) => {
-    const row = document.createElement('div')
-    row.className = 'list-item'
-    row.textContent = cmd.label
-    row.classList.toggle('active', idx == paletteIndex)
-    row.addEventListener('click', () => { cmd.action(); closeCommandPalette() })
-    commandPaletteList.appendChild(row)
-  })
-}
-
-function openCommandPalette() {
-  if (!commandPaletteModal || !commandPaletteInput) return
-  if (appPanel && appPanel.classList.contains('hidden')) return
-  commandPaletteModal.classList.remove('hidden')
-  commandPaletteModal.style.pointerEvents = 'auto'
-  commandPaletteInput.value = ''
-  renderCommandPalette()
-  commandPaletteInput.focus()
-}
-
-function closeCommandPalette() {
-  if (!commandPaletteModal) return
-  commandPaletteModal.classList.add('hidden')
-  commandPaletteModal.style.pointerEvents = 'none'
-}
-
-function getRosterNoteKey(entryId) {
-  return `roster_note_${entryId}`
-}
-
-
-async function openEntityNote(entityType, entityId) {
-  state.noteEntityType = entityType
-  state.noteEntityId = entityId
-  state.rosterNoteEntryId = null
-  rosterNoteText.value = ''
-  if (sspStatus) sspStatus.textContent = ''
-  if (sspRevokeBtn) sspRevokeBtn.classList.add('hidden')
-  rosterNoteModal.classList.remove('hidden')
-  rosterNoteModal.style.pointerEvents = 'auto'
-  if (entityType === 'roster_entry') {
-    const entry = (state.rosterEntries || []).find((r) => r.id === entityId)
-    if (entry?.ssp_passed) {
-      if (sspStatus) sspStatus.textContent = 'SSP passed'
-      if (sspRevokeBtn) sspRevokeBtn.classList.remove('hidden')
-    } else {
-      if (sspStatus) sspStatus.textContent = 'SSP not passed'
-    }
-  }
-  try {
-    const data = await apiFetch(`/notes?entityType=${entityType}&entityId=${entityId}&locationId=${state.locationId}`)
-    const noteObj = (data.notes && data.notes[0]) ? data.notes[0] : null
-    const note = noteObj ? noteObj.note : ''
-    rosterNoteText.value = note || ''
-    if (noteInternalToggle) noteInternalToggle.checked = noteObj ? !!noteObj.is_internal : true
-  } catch {
-    // no-op
-  }
-}
-
-function openRosterNote(entryId) {
-  state.rosterNoteEntryId = entryId
-  openEntityNote('roster_entry', entryId)
-}
-
-function closeRosterNote() {
-  rosterNoteModal.classList.add('hidden')
-  state.rosterNoteEntryId = null
-  state.noteEntityId = null
-}
-
-async function saveRosterNote() {
-  const entryId = state.noteEntityId || state.rosterNoteEntryId
-  if (!entryId) return
-  const value = rosterNoteText.value || ''
-  const isInternal = noteInternalToggle ? !!noteInternalToggle.checked : true
-  try {
-    await apiFetch('/notes', {
-      method: 'POST',
-      body: JSON.stringify({
-        locationId: state.locationId,
-        entityType: state.noteEntityType || 'roster_entry',
-        entityId: entryId,
-        note: value,
-        isInternal
-      })
-    })
-  } catch {
-    localStorage.setItem(getRosterNoteKey(entryId), value)
-  }
-  closeRosterNote()
-  renderRoster()
-}
-
-function clearRosterNote() {
-  const entryId = state.noteEntityId || state.rosterNoteEntryId
-  if (!entryId) return
-  localStorage.removeItem(getRosterNoteKey(entryId))
-  rosterNoteText.value = ''
-  renderRoster()
-}
-
-async function markSspPassed() {
-  const entryId = state.noteEntityId || state.rosterNoteEntryId
-  if (!entryId || !state.locationId) return
-  if (sspStatus) sspStatus.textContent = 'Saving SSP…'
-  try {
-    const cls = getSelectedClassInstance()
-    const data = await apiFetch('/ssp/pass', {
-      method: 'POST',
-      body: JSON.stringify({
-        locationId: state.locationId,
-        rosterEntryId: entryId,
-        classInstanceId: cls?.id || null
-      })
-    })
-    if (sspStatus) sspStatus.textContent = 'SSP recorded ✓'
-    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
-    const entry = rosterEntries.find((r) => r.id === entryId)
-    if (entry) entry.ssp_passed = true
-    renderRoster()
-    loadNotifications()
-  } catch (err) {
-    if (sspStatus) sspStatus.textContent = err?.error || 'SSP failed'
-  }
-}
-
-async function markSspRevoked() {
-  const entryId = state.noteEntityId || state.rosterNoteEntryId
-  if (!entryId || !state.locationId) return
-  if (sspStatus) sspStatus.textContent = 'Revoking SSP…'
-  try {
-    const cls = getSelectedClassInstance()
-    await apiFetch('/ssp/revoke', {
-      method: 'POST',
-      body: JSON.stringify({
-        locationId: state.locationId,
-        rosterEntryId: entryId,
-        classInstanceId: cls?.id || null
-      })
-    })
-    if (sspStatus) sspStatus.textContent = 'SSP revoked'
-    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
-    const entry = rosterEntries.find((r) => r.id === entryId)
-    if (entry) entry.ssp_passed = false
-    renderRoster()
-    loadNotifications()
-  } catch (err) {
-    if (sspStatus) sspStatus.textContent = err?.error || 'SSP revoke failed'
-  }
 }
 
 async function openBillingFlag(entry) {
@@ -2577,25 +2482,15 @@ async function openBillingFlag(entry) {
     return
   }
   if (!state.locationId) return
-  const reason = prompt('Billing flag reason?')
-  if (!reason) return
-  try {
-    await apiFetch('/billing/tickets', {
-      method: 'POST',
-      body: JSON.stringify({
-        locationId: state.locationId,
-        childExternalId: entry?.swimmer_external_id || null,
-        reason,
-        priority: 'med',
-        status: 'open'
-      })
-    })
-    setRosterStatus('Billing ticket created ✓')
-    setTimeout(() => setRosterStatus(''), 1500)
-    loadBillingTickets()
-  } catch (err) {
-    setRosterStatus(err?.error || 'Billing ticket failed')
-  }
+  await loadStaff()
+  openBillingModal({
+    locationId: state.locationId,
+    contactId: entry?.contact_id || entry?.contactId || null,
+    childExternalId: entry?.swimmer_external_id || entry?.childExternalId || null,
+    reason: '',
+    priority: 'med',
+    status: 'open'
+  })
 }
 
 async function loadLineage() {
@@ -2889,6 +2784,9 @@ function renderEnrollmentReport(data) {
   const enrollMap = new Map(enrollments.map((e) => [e.date, e.count || 0]))
   const leadCounts = dates.map((d) => leadMap.get(d) || 0)
   const enrollCounts = dates.map((d) => enrollMap.get(d) || 0)
+  const attendance = Array.isArray(data.attendanceSignals) ? data.attendanceSignals : []
+  const attendanceMap = new Map(attendance.map((a) => [a.date, a.count || 0]))
+  const attendanceCounts = dates.map((d) => attendanceMap.get(d) || 0)
 
   enrollmentChart = renderChart(enrollmentChartEl, {
     type: 'line',
@@ -2896,7 +2794,8 @@ function renderEnrollmentReport(data) {
       labels: dates,
       datasets: [
         { label: 'Leads', data: leadCounts, borderColor: '#0EA5E9', backgroundColor: 'rgba(14,165,233,0.2)', tension: 0.2 },
-        { label: 'Enrollments', data: enrollCounts, borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.2)', tension: 0.2 }
+        { label: 'Enrollments', data: enrollCounts, borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.2)', tension: 0.2 },
+        { label: 'First-class signals', data: attendanceCounts, borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.2)', tension: 0.2 }
       ]
     },
     options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
@@ -2905,15 +2804,63 @@ function renderEnrollmentReport(data) {
   enrollmentTable.innerHTML = ''
   if (!dates.length) {
     enrollmentTable.innerHTML = '<div class="hint">No enrollment activity.</div>'
-    return
-  }
-  dates.forEach((date) => {
+  } else {
+    dates.forEach((date) => {
     const item = document.createElement('div')
     item.className = 'list-item'
     item.innerHTML = `<strong>${date}</strong>
       <div class="muted tiny">Leads ${leadMap.get(date) || 0} • Enrollments ${enrollMap.get(date) || 0}</div>`
     enrollmentTable.appendChild(item)
   })
+  }
+
+  if (enrollmentByLocation) {
+    const byLoc = Array.isArray(data.byLocation) ? data.byLocation : []
+    enrollmentByLocation.innerHTML = ''
+    if (!byLoc.length) {
+      enrollmentByLocation.innerHTML = '<div class="hint">No location data.</div>'
+    } else {
+      byLoc.forEach((row) => {
+        const item = document.createElement('div')
+        item.className = 'list-item'
+        item.innerHTML = `<strong>${row.location_name || ''}</strong>
+          <div class="muted tiny">Leads ${row.leads || 0} • Enrollments ${row.enrollments || 0}</div>`
+        enrollmentByLocation.appendChild(item)
+      })
+    }
+  }
+
+  if (enrollmentByStaff) {
+    const byStaff = Array.isArray(data.byStaff) ? data.byStaff : []
+    enrollmentByStaff.innerHTML = ''
+    if (!byStaff.length) {
+      enrollmentByStaff.innerHTML = '<div class="hint">No staff signals.</div>'
+    } else {
+      byStaff.forEach((row) => {
+        const item = document.createElement('div')
+        item.className = 'list-item'
+        item.innerHTML = `<strong>${formatInstructorLabel(row.instructor)}</strong>
+          <div class="muted tiny">First-class signals ${row.count || 0}</div>`
+        enrollmentByStaff.appendChild(item)
+      })
+    }
+  }
+
+  if (enrollmentWorkQueue) {
+    const work = Array.isArray(data.workQueue) ? data.workQueue : []
+    enrollmentWorkQueue.innerHTML = ''
+    if (!work.length) {
+      enrollmentWorkQueue.innerHTML = '<div class="hint">No work queue items.</div>'
+    } else {
+      work.forEach((row) => {
+        const item = document.createElement('div')
+        item.className = 'list-item'
+        item.innerHTML = `<strong>${row.full_name || ''}</strong>
+          <div class="muted tiny">${row.lead_date || ''} • ${row.email || ''} ${row.phone ? '• ' + row.phone : ''}</div>`
+        enrollmentWorkQueue.appendChild(item)
+      })
+    }
+  }
 }
 
 function renderRetentionReport(data) {
@@ -2996,6 +2943,12 @@ function renderContacts() {
     mergeBtn.textContent = 'Merge'
     mergeBtn.addEventListener('click', () => openContactMerge(c.id))
     item.appendChild(mergeBtn)
+
+    const billingBtn = document.createElement('button')
+    billingBtn.className = 'secondary miniBtn'
+    billingBtn.textContent = 'Billing Ticket'
+    billingBtn.addEventListener('click', () => openBillingFlag({ contact_id: c.id }))
+    item.appendChild(billingBtn)
     contactsTable.appendChild(item)
   })
 }
@@ -3024,7 +2977,7 @@ function downloadCsv(filename, rows) {
 function exportAttendanceCsv() {
   const data = state.reports.attendance
   if (!data) return
-  const rows = [['Instructor', 'Present', 'Absent', 'Unknown', 'Total']]
+  const rows = [['Aquatics Staff', 'Present', 'Absent', 'Unknown', 'Total']]
   ;(data.byInstructor || []).forEach((r) => {
     rows.push([formatInstructorLabel(r.instructor), r.present || 0, r.absent || 0, r.unknown || 0, r.total || 0])
   })
@@ -3034,7 +2987,7 @@ function exportAttendanceCsv() {
 function exportInstructorCsv() {
   const data = state.reports.instructorLoad
   if (!data) return
-  const rows = [['Instructor', 'Classes', 'Swimmers', 'Sub Count', 'Sub Rate']]
+  const rows = [['Aquatics Staff', 'Classes', 'Swimmers', 'Sub Count', 'Sub Rate']]
   ;(data.byInstructor || []).forEach((r) => {
     rows.push([formatInstructorLabel(r.instructor), r.classes || 0, r.swimmers || 0, r.subCount || 0, r.subRate || 0])
   })
@@ -3055,7 +3008,7 @@ function exportRosterHealthCsv() {
 function exportSspCsv() {
   const data = state.reports.ssp
   if (!data) return
-  const rows = [['Instructor', 'Passes']]
+  const rows = [['Aquatics Staff', 'Passes']]
   ;(data.byInstructor || []).forEach((r) => {
     rows.push([formatInstructorLabel(r.instructor), r.count || 0])
   })
@@ -3080,7 +3033,7 @@ function exportEnrollmentCsv() {
 function exportRetentionCsv() {
   const data = state.reports.retention
   if (!data) return
-  const rows = [['Instructor', 'Booked', 'Retained', 'Percent']]
+  const rows = [['Aquatics Staff', 'Booked', 'Retained', 'Percent']]
   ;(data.rows || []).forEach((r) => {
     rows.push([r.instructor_name || '', r.booked || 0, r.retained || 0, r.percent_this_cycle || 0])
   })
@@ -3116,7 +3069,7 @@ function exportContactsCsv() {
 
 async function loadReports() {
   const role = getEffectiveRoleKey()
-  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  const locationId = role === 'admin' ? 'all' : state.locationId
   if (!locationId) {
     setReportsStatus('Select a location to view reports.')
     return
@@ -3145,7 +3098,7 @@ async function loadReports() {
     }
   }
 
-  const subtab = state.subtabs.reports || 'enrollment-tracker'
+  const subtab = state.subtabs.reports || 'index'
   if (subtab === 'enrollment-tracker') {
     const enrollment = await fetchReport('/reports/enrollment-tracker')
     state.reports.enrollment = enrollment
@@ -3180,7 +3133,7 @@ async function loadReports() {
 async function loadContacts() {
   if (!contactsTable) return
   const role = getEffectiveRoleKey()
-  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  const locationId = role === 'admin' ? 'all' : state.locationId
   if (!locationId) {
     contactsTable.innerHTML = '<div class="hint">Select a location to view contacts.</div>'
     return
@@ -3215,7 +3168,7 @@ async function openContactMerge(contactId) {
 
 async function loadUploads() {
   const role = getEffectiveRoleKey()
-  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  const locationId = role === 'admin' ? 'all' : state.locationId
   if (!locationId) {
     if (uploadHistoryList) uploadHistoryList.innerHTML = '<div class="hint">Select a location to view uploads.</div>'
     return
@@ -3246,7 +3199,7 @@ async function loadUploads() {
 
 async function loadStaff() {
   const role = getEffectiveRoleKey()
-  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  const locationId = role === 'admin' ? 'all' : state.locationId
   if (!locationId) {
     if (staffList) staffList.innerHTML = '<div class="hint">Select a location to view staff.</div>'
     return
@@ -3512,6 +3465,13 @@ locationSelect?.addEventListener('change', () => {
   state.manualOverride = false
   state.selectedBlock = null
   state.showAllTimes = false
+  if (state.view === 'roster' && state.locationId === 'all') {
+    const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
+    if (first) {
+      state.locationId = first.id
+      locationSelect.value = first.id
+    }
+  }
   if (state.locationId === 'all') {
     state.rosterMode = 'all'
     if (rosterModeSelect) {
@@ -3635,8 +3595,8 @@ billingFlagBtn?.addEventListener('click', () => {
 })
 rosterNoteModal?.addEventListener('click', (e) => { if (e.target === rosterNoteModal) closeRosterNote() })
 addSwimmerModal?.addEventListener('click', (e) => { if (e.target === addSwimmerModal) closeAddSwimmer() })
-obsFormTab?.addEventListener('click', () => setObsTab('form'))
-obsDashTab?.addEventListener('click', () => { setObsTab('dashboard'); loadObservationDashboard() })
+obsFormTab?.addEventListener('click', () => setSubtab('observations', 'form'))
+obsDashTab?.addEventListener('click', () => setSubtab('observations', 'dashboard'))
 obsLoadRosterBtn?.addEventListener('click', () => { loadObservationClasses(); loadObservationSwimmersFromRoster() })
 obsInstructorOverride?.addEventListener('change', applyInstructorOverride)
 obsClassSelect?.addEventListener('change', () => {
@@ -3664,6 +3624,8 @@ activityClear?.addEventListener('click', () => {
   ensureActivityDefaultDates()
   loadActivityFeed()
 })
+billingSaveBtn?.addEventListener('click', saveBillingModal)
+billingCancelBtn?.addEventListener('click', closeBillingModal)
 billingRefreshBtn?.addEventListener('click', loadBillingTickets)
 billingStatusFilter?.addEventListener('change', loadBillingTickets)
 activityPresetToday?.addEventListener('click', () => {
@@ -3833,6 +3795,13 @@ function closeUploadConfirm() {
   uploadConfirmModal.style.pointerEvents = 'none'
   if (uploadConfirmRun) uploadConfirmRun.disabled = false
 }
+
+document.querySelectorAll('[data-subtab-link]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const sub = btn.dataset.subtabLink
+    if (sub) setSubtab('reports', sub)
+  })
+})
 
 document.querySelectorAll('.navItem').forEach((tab) => {
   tab.addEventListener('click', () => {

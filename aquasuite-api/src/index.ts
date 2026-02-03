@@ -14,7 +14,7 @@ import { parseIclassproRosterEntries } from './parsers/parseRosterEntries.js'
 import { hasIntegration, listLocationUuids, maskUuid, validateEnv, getDefaultLocationKey, normalizeLocation, getLocationUuid } from './config/keys.js'
 import { normalizeName } from './utils/normalizeName.js'
 import { preflightReport } from './services/reportPreflight.js'
-import { extractInstructorRetention, parseUsDate } from './utils/reportParsing.js'
+import { extractInstructorRetention, extractAgedAccounts, extractDropList, extractEnrollmentEvents, extractAcneLeads, parseUsDate } from './utils/reportParsing.js'
 import { normalizeLocationFeatures } from './services/locationFeatures.js'
 import { getGmailAuthUrl, exchangeGmailCode } from './integrations/gmail/oauth.js'
 import { fetchHomebaseEmployees, fetchHomebaseShifts } from './integrations/homebase/client.js'
@@ -284,6 +284,86 @@ async function createManagerNotification(locationId: string | null, type: string
 
 async function createGeneralNotification(locationId: string | null, type: string, message: string, createdBy: string | null, payload?: any, entityType?: string | null, entityId?: string | null) {
   return createNotification(locationId, type, message, createdBy, payload, { channel: 'general', entityType, entityId })
+}
+
+
+async function createReconciliationIfMissing(locationId: string | null, entityType: string, entityKey: string, issueType: string, options: any) {
+  const existing = await pool.query(
+    `SELECT id FROM reconciliations
+     WHERE entity_type=$1 AND entity_key=$2 AND issue_type=$3 AND resolved_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [entityType, entityKey, issueType]
+  )
+  if (existing.rowCount) return existing.rows[0].id
+  const res = await pool.query(
+    `INSERT INTO reconciliations (location_id, entity_type, entity_key, issue_type, options)
+     VALUES ($1,$2,$3,$4,$5)
+     RETURNING id`,
+    [locationId, entityType, entityKey, issueType, options ? JSON.stringify(options) : null]
+  )
+  return res.rows[0]?.id || null
+}
+
+async function upsertContactFromLead(locationId: string | null, source: string, fullName: string | null, email: string | null, phone: string | null) {
+  if (!email && !phone) {
+    if (!fullName) return null
+    const existingByName = await pool.query(
+      `SELECT id FROM contacts WHERE location_id IS NOT DISTINCT FROM $1 AND lower(full_name)=lower($2) LIMIT 1`,
+      [locationId, fullName]
+    )
+    if (existingByName.rowCount) return existingByName.rows[0].id
+    const res = await pool.query(
+      `INSERT INTO contacts (location_id, source, full_name, email, phone)
+       VALUES ($1,$2,$3,$4,$5)
+       RETURNING id`,
+      [locationId, source, fullName, null, null]
+    )
+    return res.rows[0]?.id || null
+  }
+  const existing = await pool.query(
+    `SELECT id, full_name, email, phone FROM contacts
+     WHERE (email IS NOT NULL AND lower(email)=lower($1)) OR (phone IS NOT NULL AND phone=$2)
+     LIMIT 1`,
+    [email, phone]
+  )
+  if (existing.rowCount) {
+    const current = existing.rows[0]
+    const changedName = fullName && current.full_name && normalizeName(current.full_name) !== normalizeName(fullName)
+    if (changedName) {
+      const entityKey = (email || phone || current.id || '').toLowerCase()
+      const recId = await createReconciliationIfMissing(locationId, 'contact', entityKey, 'contact_conflict', {
+        existing: { id: current.id, fullName: current.full_name, email: current.email, phone: current.phone },
+        incoming: { fullName, email, phone, source }
+      })
+      await createManagerNotification(locationId, 'contact_conflict', `Contact conflict detected for ${email || phone || fullName || 'contact'}`, null, { entityKey }, 'reconciliation', recId)
+    }
+    await pool.query(
+      `UPDATE contacts
+       SET full_name=COALESCE($1, full_name),
+           email=COALESCE($2, email),
+           phone=COALESCE($3, phone),
+           source=COALESCE($4, source),
+           updated_at=now()
+       WHERE id=$5`,
+      [fullName, email, phone, source, current.id]
+    )
+    return current.id
+  }
+  const res = await pool.query(
+    `INSERT INTO contacts (location_id, source, full_name, email, phone)
+     VALUES ($1,$2,$3,$4,$5)
+     RETURNING id`,
+    [locationId, source, fullName, email, phone]
+  )
+  return res.rows[0]?.id || null
+}
+
+async function logParseAnomaly(locationId: string | null, reportType: string, warnings: string[], meta?: any) {
+  if (!warnings || !warnings.length) return
+  const key = `${reportType}_${locationId || 'all'}`
+  const recId = await createReconciliationIfMissing(locationId, 'report', key, 'parse_anomaly', { reportType, warnings, meta })
+  await createManagerNotification(locationId, 'report_parse_warning', `Parse warnings for ${reportType}: ${warnings.join(', ')}`, null, { reportType, warnings }, 'reconciliation', recId)
 }
 
 async function upsertIntegrationStatus(provider: string, locationId: string | null, fields: {
@@ -1903,10 +1983,12 @@ app.post('/reports/upload', async (req, reply) => {
   const detectedStart = parseUsDate(dateRange.start || null)
   const detectedEnd = parseUsDate(dateRange.end || null)
 
-  await pool.query(
+
+  const uploadLogRes = await pool.query(
     `INSERT INTO uploads
       (type, location_id, uploaded_by_user_id, detected_start_date, detected_end_date, parsed_count, inserted_count, warnings)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     RETURNING id`,
     [
       resolvedReportType,
       locationId,
@@ -1918,9 +2000,17 @@ app.post('/reports/upload', async (req, reply) => {
       JSON.stringify(preflight.warnings || [])
     ]
   )
+  const uploadLogId = uploadLogRes.rows[0]?.id || null
+  const parseWarnings = [...(preflight.warnings || [])]
+
+  let parsedCount = 0
+  let insertedCount = 0
 
   if (resolvedReportType === 'instructor_retention') {
     const rows = extractInstructorRetention(html)
+    parsedCount = rows.length
+    insertedCount = rows.length
+    if (!rows.length) parseWarnings.push('no_rows_parsed')
     const asOfStart = detectedStart
     const asOfEnd = detectedEnd
 
@@ -1928,7 +2018,7 @@ app.post('/reports/upload', async (req, reply) => {
       `INSERT INTO retention_snapshots (location_id, report_date, source_upload_id)
        VALUES ($1,$2,$3)
        RETURNING id`,
-      [locationId, asOfEnd || asOfStart, uploadRes.rows[0]?.id || null]
+      [locationId, asOfEnd || asOfStart, uploadLogId]
     )
     const snapshotId = snapshotRes.rows[0]?.id
 
@@ -1974,28 +2064,121 @@ app.post('/reports/upload', async (req, reply) => {
         )
       }
     }
+  } else if (resolvedReportType === 'aged_accounts') {
+    const result = extractAgedAccounts(html)
+    parsedCount = result.rows.length
+    insertedCount = result.rows.length
+    parseWarnings.push(...result.warnings)
+    if (!result.rows.length) parseWarnings.push('no_rows_parsed')
 
+    const snapshotRes = await pool.query(
+      `INSERT INTO aged_accounts_snapshots (location_id, report_date, source_upload_id)
+       VALUES ($1,$2,$3)
+       RETURNING id`,
+      [locationId, detectedEnd || detectedStart, uploadLogId]
+    )
+    const snapshotId = snapshotRes.rows[0]?.id
+
+    for (const row of result.rows) {
+      await pool.query(
+        `INSERT INTO aged_accounts_rows (snapshot_id, bucket, amount, total)
+         VALUES ($1,$2,$3,$4)`,
+        [snapshotId, row.bucket, row.amount, row.total]
+      )
+    }
+  } else if (resolvedReportType === 'drop_list') {
+    const result = extractDropList(html)
+    parsedCount = result.rows.length
+    insertedCount = result.rows.length
+    parseWarnings.push(...result.warnings)
+    if (!result.rows.length) parseWarnings.push('no_rows_parsed')
+
+    if (detectedStart || detectedEnd) {
+      await pool.query(
+        `DELETE FROM drop_events WHERE location_id=$1 AND drop_date BETWEEN $2 AND $3`,
+        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
+      )
+    }
+
+    for (const row of result.rows) {
+      const dropDate = row.dropDate || detectedEnd || detectedStart
+      await pool.query(
+        `INSERT INTO drop_events (location_id, drop_date, swimmer_name, reason, source_upload_id)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [locationId, dropDate, row.swimmerName, row.reason, uploadLogId]
+      )
+    }
+  } else if (resolvedReportType === 'new_enrollments') {
+    const result = extractEnrollmentEvents(html)
+    parsedCount = result.rows.length
+    insertedCount = result.rows.length
+    parseWarnings.push(...result.warnings)
+    if (!result.rows.length) parseWarnings.push('no_rows_parsed')
+
+    if (detectedStart || detectedEnd) {
+      await pool.query(
+        `DELETE FROM enrollment_events WHERE location_id=$1 AND event_date BETWEEN $2 AND $3`,
+        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
+      )
+    }
+
+    for (const row of result.rows) {
+      const eventDate = row.eventDate || detectedEnd || detectedStart
+      await pool.query(
+        `INSERT INTO enrollment_events (location_id, event_date, swimmer_name, source_upload_id)
+         VALUES ($1,$2,$3,$4)`,
+        [locationId, eventDate, row.swimmerName, uploadLogId]
+      )
+      await upsertContactFromLead(locationId, 'enrollment', row.swimmerName, null, null)
+    }
+  } else if (resolvedReportType === 'acne') {
+    const result = extractAcneLeads(html)
+    parsedCount = result.rows.length
+    insertedCount = result.rows.length
+    parseWarnings.push(...result.warnings)
+    if (!result.rows.length) parseWarnings.push('no_rows_parsed')
+
+    if (detectedStart || detectedEnd) {
+      await pool.query(
+        `DELETE FROM acne_leads WHERE location_id=$1 AND lead_date BETWEEN $2 AND $3`,
+        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
+      )
+    }
+
+    for (const row of result.rows) {
+      const leadDate = row.leadDate || detectedEnd || detectedStart
+      await pool.query(
+        `INSERT INTO acne_leads (location_id, lead_date, full_name, email, phone, source_upload_id)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [locationId, leadDate, row.fullName, row.email, row.phone, uploadLogId]
+      )
+      await upsertContactFromLead(locationId, 'acne', row.fullName, row.email, row.phone)
+    }
+  }
+
+  if (uploadLogId) {
     await pool.query(
-      `UPDATE uploads SET parsed_count=$1, inserted_count=$2
-       WHERE id = (
-         SELECT id FROM uploads
-         WHERE type=$3 AND location_id=$4 AND uploaded_by_user_id=$5
-           AND detected_start_date IS NOT DISTINCT FROM $6
-           AND detected_end_date IS NOT DISTINCT FROM $7
-         ORDER BY uploaded_at DESC
-         LIMIT 1
-       )`,
-      [
-        rows.length,
-        rows.length,
-        preflight.reportType || 'report',
-        locationId,
-        sess.user_id,
-        detectedStart,
-        detectedEnd
-      ]
+      `UPDATE uploads SET parsed_count=$1, inserted_count=$2, warnings=$3 WHERE id=$4`,
+      [parsedCount, insertedCount, JSON.stringify(parseWarnings), uploadLogId]
     )
   }
+
+  if (parseWarnings.length) {
+    await logParseAnomaly(locationId, resolvedReportType, parseWarnings, { parsedCount, insertedCount })
+  }
+
+  await logActivity(locationId, sess.user_id, 'report_upload', uploadLogId, 'parsed', {
+    reportType: resolvedReportType,
+    parsedCount,
+    insertedCount,
+    warnings: parseWarnings
+  })
+  await createManagerNotification(locationId, 'report_upload_completed', `Report upload complete: ${resolvedReportType} (${parsedCount})`, sess.user_id, {
+    reportType: resolvedReportType,
+    parsedCount,
+    insertedCount,
+    warnings: parseWarnings
+  }, 'upload', uploadLogId)
 
   return reply.send({
     ok: true,
@@ -2440,7 +2623,82 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
     leadParams
   )
 
-  return reply.send({ enrollments: enrollments.rows, leads: leads.rows })
+  const attendanceSignals = await pool.query(
+    `SELECT class_date::text as date, COUNT(*)::int as count
+     FROM roster_entries
+     WHERE ${where} AND flag_first_time=true
+     GROUP BY class_date
+     ORDER BY class_date`,
+    params
+  )
+
+  let byLocation = []
+  if (locationId === 'all') {
+    const leadByLoc = await pool.query(
+      `SELECT l.id, l.name, COUNT(a.*)::int as leads
+       FROM locations l
+       LEFT JOIN acne_leads a ON a.location_id=l.id
+       ${leadWhere.replace('WHERE 1=1', 'WHERE 1=1')}
+       GROUP BY l.id, l.name
+       ORDER BY l.name`,
+      leadParams
+    )
+    const enrollByLoc = await pool.query(
+      `SELECT l.id, l.name, COUNT(e.*)::int as enrollments
+       FROM locations l
+       LEFT JOIN enrollment_events e ON e.location_id=l.id
+       ${where.replace('WHERE 1=1', 'WHERE 1=1')}
+       GROUP BY l.id, l.name
+       ORDER BY l.name`,
+      params
+    )
+    const enrollMap = new Map(enrollByLoc.rows.map((r) => [r.id, r.enrollments]))
+    byLocation = leadByLoc.rows.map((row) => ({
+      location_id: row.id,
+      location_name: row.name,
+      leads: row.leads || 0,
+      enrollments: enrollMap.get(row.id) || 0
+    }))
+  }
+
+  const byStaffRes = await pool.query(
+    `SELECT COALESCE(actual_instructor, scheduled_instructor, instructor_name, 'Unassigned') as instructor,
+            COUNT(*)::int as count
+     FROM roster_entries
+     WHERE ${where} AND flag_first_time=true
+     GROUP BY instructor
+     ORDER BY count DESC`,
+    params
+  )
+
+  const enrollmentNames = await pool.query(
+    `SELECT DISTINCT lower(swimmer_name) as name
+     FROM enrollment_events
+     ${where}`,
+    params
+  )
+  const enrolledNames = new Set(enrollmentNames.rows.map((r) => r.name))
+  const leadsRaw = await pool.query(
+    `SELECT lead_date::text as lead_date, full_name, email, phone
+     FROM acne_leads
+     ${leadWhere}
+     ORDER BY lead_date DESC
+     LIMIT 200`,
+    leadParams
+  )
+  const workQueue = leadsRaw.rows.filter((row) => {
+    const key = String(row.full_name || '').toLowerCase()
+    return key && !enrolledNames.has(key)
+  })
+
+  return reply.send({
+    enrollments: enrollments.rows,
+    leads: leads.rows,
+    attendanceSignals: attendanceSignals.rows,
+    byLocation,
+    byStaff: byStaffRes.rows,
+    workQueue
+  })
 })
 
 app.get('/reports/ssp', async (req, reply) => {
@@ -3351,7 +3609,7 @@ app.get('/instructor-variants', async (req, reply) => {
         COUNT(*)::int AS count_seen,
         MAX(created_at) AS last_seen_at
      FROM roster_entries
-     WHERE location_id=$1 AND class_date >= CURRENT_DATE - $2
+     WHERE location_id=$1 AND class_date >= (CURRENT_DATE - ($2::int))
        AND COALESCE(instructor_name_raw, instructor_name) IS NOT NULL
      GROUP BY name_raw, name_norm, matched_staff_id
      ORDER BY count_seen DESC`,
@@ -3502,6 +3760,28 @@ app.get('/notes', async (req, reply) => {
     [entityType, entityId]
   )
   return { notes: res.rows }
+})
+
+app.get('/ssp/events', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager','instructor'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  const rosterEntryId = (req.query as any)?.rosterEntryId as string | undefined
+  if (!locationId || !rosterEntryId) return reply.code(400).send({ error: 'locationId_and_rosterEntryId_required' })
+
+  const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+  if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+
+  const res = await pool.query(
+    `SELECT id, status, note, created_at
+     FROM ssp_events
+     WHERE location_id=$1 AND roster_entry_id=$2
+     ORDER BY created_at DESC`,
+    [locationId, rosterEntryId]
+  )
+  return reply.send({ events: res.rows })
 })
 
 app.post('/ssp/pass', async (req, reply) => {
