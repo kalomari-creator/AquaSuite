@@ -1392,9 +1392,13 @@ app.get('/locations', async (req) => {
               l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled,
               l.created_at
        FROM (
-         SELECT location_id, is_default FROM user_locations WHERE user_id=$1
-         UNION
-         SELECT location_id, is_default FROM user_location_access WHERE user_id=$1
+         SELECT location_id, MAX(is_default::int)::int AS is_default
+         FROM (
+           SELECT location_id, is_default FROM user_locations WHERE user_id=$1
+           UNION ALL
+           SELECT location_id, is_default FROM user_location_access WHERE user_id=$1
+         ) ula
+         GROUP BY location_id
        ) ula
        JOIN locations l ON l.id = ula.location_id
        WHERE l.is_active = true
