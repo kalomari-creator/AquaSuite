@@ -1044,7 +1044,7 @@ function activateSubtab(view, subtab) {
   }
 }
 
-function parseRouteHash() {() {
+function parseRouteHash() {
   const hash = (location.hash || '').replace(/^#/, '')
   if (!hash) return null
   const cleaned = hash.replace(/^\//, '')
