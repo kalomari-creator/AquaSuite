@@ -373,9 +373,10 @@ html[data-layout=tablet] #viewRoster{
 }
 html[data-layout=tablet] #viewRoster > [data-subtab="main"]{
   display:grid;
-  grid-template-columns: minmax(220px, 32%) minmax(0, 1fr);
+  grid-template-columns: minmax(240px, 34%) minmax(0, 1fr);
   gap:14px;
   align-items:start;
+  min-width:0;
 }
 html[data-layout=tablet] #viewRoster > [data-subtab="main"] > .card{
   min-width:0;
@@ -400,9 +401,10 @@ html[data-layout=desktop] #viewRoster{
 }
 html[data-layout=desktop] #viewRoster > [data-subtab="main"]{
   display:grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap:14px;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap:16px;
   align-items:start;
+  min-width:0;
 }
 html[data-layout=desktop] #viewRoster > [data-subtab="main"] > .card{
   min-width:0;

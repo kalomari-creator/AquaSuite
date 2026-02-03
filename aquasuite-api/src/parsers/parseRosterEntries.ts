@@ -77,6 +77,11 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
     const zoneText = $section.find('th:contains("Zone:")').next().find('span').text().trim()
     const zoneMatch = zoneText.match(/Zone\s*(\d+)/i)
     if (zoneMatch) zone = parseInt(zoneMatch[1], 10)
+    if (!zone) {
+      const sectionText = $section.text()
+      const zoneFallback = sectionText.match(/Zone\s*(\d+)/i)
+      if (zoneFallback) zone = parseInt(zoneFallback[1], 10)
+    }
 
     const $table = $section.find("table.table-roll-sheet").first()
     const sectionText = $section.text()
@@ -109,9 +114,9 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
       const rowInstructorCell = instructorColumnIndex >= 0 ? $row.find("td").eq(instructorColumnIndex) : null
       const rowInstructorMeta = rowInstructorCell ? extractInstructorMetaFromText(rowInstructorCell.text()) : null
 
-      const resolvedInstructor = rowInstructorMeta?.instructorName || instructorMeta.instructorName
-      const resolvedSub = rowInstructorMeta?.substituteInstructor || instructorMeta.substituteInstructor
-      const resolvedRaw = rowInstructorMeta?.raw || instructorMeta.raw
+      const resolvedInstructor = stripDateSuffix(rowInstructorMeta?.instructorName || instructorMeta.instructorName)
+      const resolvedSub = stripDateSuffix(rowInstructorMeta?.substituteInstructor || instructorMeta.substituteInstructor)
+      const resolvedRaw = stripDateSuffix(rowInstructorMeta?.raw || instructorMeta.raw)
       const isSub = !!resolvedSub
       const scheduledInstructor = resolvedInstructor || undefined
       const actualInstructor = resolvedSub || resolvedInstructor || undefined
@@ -143,7 +148,8 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
         }
       }
 
-      const { program, level } = splitProgramLevel(programText || "")
+      const programSource = programText || className || ''
+      const { program, level } = splitProgramLevel(programSource)
 
       if (dateColumns.length > 0) {
         const rowCells = $row.find("td")
@@ -266,6 +272,12 @@ function normalizeProgramNonGroup(raw: string): string {
   return t
 }
 
+function stripDateSuffix(value: string | undefined): string | undefined {
+  if (!value) return value
+  const cleaned = String(value).replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, '').replace(/\s+/g, ' ').trim()
+  return cleaned || undefined
+}
+
 function normalizeAgeText(raw: string): string | undefined {
   const text = String(raw || "").replace(/\s+/g, " ").trim()
   if (!text) return undefined
@@ -341,12 +353,12 @@ function extractInstructorMetaFromText(raw: string): { instructorName?: string; 
   let substituteInstructor: string | undefined
 
   const processName = (name: string) => {
-    const cleaned = name.replace(/^Instructors?:/i, "").trim()
+    const cleaned = name.replace(/^Instructors?:/i, "").replace(/\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, "").trim()
     if (!cleaned) return
     const isSub = /\*|\(sub\)/i.test(cleaned)
     const normalized = cleaned.replace(/\(sub\)/gi, "").replace(/\*/g, "").trim()
     if (!normalized) return
-    if (!raw) raw = cleaned
+    raw = cleaned
     if (isSub) {
       substituteInstructor = lastFirstToFirstLast(normalized)
     } else if (!instructorName) {

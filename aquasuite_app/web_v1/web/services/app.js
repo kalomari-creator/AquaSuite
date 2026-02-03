@@ -2754,7 +2754,7 @@ function ensureReportDates() {
   if (!reportStartDate.value || !reportEndDate.value) {
     const end = state.date ? new Date(state.date) : new Date()
     const start = new Date(end)
-    start.setDate(end.getDate() - 6)
+    start.setDate(end.getDate() - 120)
     reportStartDate.value = formatDateInputValue(start)
     reportEndDate.value = formatDateInputValue(end)
   }
@@ -3923,8 +3923,8 @@ function setUploadStatus(textValue) {
 
 function syncUploadConfirmState() {
   if (!uploadConfirmRun) return
-  const mode = uploadMergeMode?.value || merge
-  if (pendingUploadIsDuplicate && mode !== replace) {
+  const mode = uploadMergeMode?.value || 'merge'
+  if (pendingUploadIsDuplicate && mode !== 'replace') {
     uploadConfirmRun.disabled = true
     return
   }
@@ -3974,10 +3974,15 @@ Date range: ${data.dateStart || ''} to ${data.dateEnd || ''}`
       uploadConfirmSummary.textContent += '\nDuplicate detected: this file was already uploaded.'
     }
     syncUploadConfirmState()
-    uploadConfirmModal.classList.remove('hidden')
-    uploadConfirmModal.style.pointerEvents = 'auto'
+    if (uploadConfirmModal) {
+      uploadConfirmModal.classList.remove('hidden')
+      uploadConfirmModal.style.pointerEvents = 'auto'
+    }
+    setUploadStatus('')
   } catch (err) {
-    setUploadStatus(err?.error || 'Preflight failed')
+    const msg = err?.error || err?.message || 'Preflight failed'
+    console.error('Upload preflight failed', err)
+    setUploadStatus(msg)
   }
 }
 
