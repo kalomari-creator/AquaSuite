@@ -112,14 +112,21 @@ button{
   cursor:pointer;
   font-weight:700;
   letter-spacing:.2px;
+  transition: all 0.15s ease;
 }
-button:hover{ background: var(--btn2); }
-button:active{ transform: translateY(1px); }
-button.primary{ background: var(--accent-soft); border-color: rgba(14,165,233,.35); }
+button:hover{ background: var(--btn2); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+button:active{ transform: translateY(1px); box-shadow: none; }
+button:focus-visible{ outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled{ opacity: 0.5; cursor: not-allowed; transform: none !important; }
+button.primary{ background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover{ background: #0284c7; border-color: #0284c7; }
 button.secondary{ border-color: rgba(148,163,184,.6); }
+button.secondary:hover{ border-color: var(--accent); }
 button.miniBtn{ padding:6px 10px; font-size:12px; min-height:34px; border-radius:10px; }
 button.tab{ padding:9px 12px; border-radius:999px; background: transparent; border-color: transparent; color:#334155; }
 button.tab.active{ background: var(--accent-soft); border-color: rgba(16,185,129,.2); outline: 2px solid rgba(16,185,129,.15); color:#065f46; }
+button.danger{ background: #FEE2E2; border-color: #FECACA; color: #DC2626; }
+button.danger:hover{ background: #FECACA; }
 
 input, select{
   padding:10px 12px;
@@ -129,11 +136,26 @@ input, select{
   color:#0f172a;
   font-weight:600;
   outline:none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-input:focus{
-  border-color:#10b981;
-  box-shadow:0 0 0 3px rgba(16,185,129,.15);
+input:focus, select:focus{
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(14,165,233,.15);
+}
+
+input:focus-visible, select:focus-visible{
+  outline: none;
+}
+
+select{
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23475569'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px;
+  padding-right: 32px;
 }
 
 .pill{
@@ -187,8 +209,13 @@ input:focus{
 .roster-row.absent{ background: rgba(255,43,43,0.12); }
 
 .attendance-btns{ display:flex; gap:6px; }
-.attendance-btns button{ padding:6px 8px; border-radius:10px; font-size:12px; }
-.attendance-btns button.active{ border-color:#0f172a; background: var(--surface-strong); }
+.attendance-btns button{ padding:6px 8px; border-radius:10px; font-size:12px; transition: all 0.15s ease; }
+.attendance-btns button:hover{ transform: scale(1.1); }
+.attendance-btns button.active{ border-color:#0f172a; background: var(--surface-strong); box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+
+/* Roster row hover */
+.roster-table tbody tr{ transition: background 0.1s ease; }
+.roster-table tbody tr:hover{ background: var(--surface); }
 
 .flag-chip{ display:inline-flex; align-items:center; gap:4px; padding:2px 6px; border-radius:999px; font-size:11px; border:1px solid var(--line); background: var(--chip); margin-right:4px; }
 
