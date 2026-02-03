@@ -1,0 +1,11 @@
+{
+  "version": "0.1",
+  "builtAt": "2026-02-02T00:52:37.800Z",
+  "notes": [
+    "Roster everywhere, Announcer Westchester only",
+    "Staff import and instructor alias mapping",
+    "Client intakes ingested from Gmail and managed in-app",
+    "Locations email tags for HubSpot prep"
+  ],
+  "buildTime": 1769993557800
+}

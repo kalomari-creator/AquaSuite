@@ -9,6 +9,8 @@ export type ParsedRosterEntry = {
   program?: string
   level?: string
   instructorName?: string
+  instructorNameRaw?: string
+  instructorNameNorm?: string
   scheduledInstructor?: string
   actualInstructor?: string
   isSub: boolean
@@ -109,6 +111,7 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
 
       const resolvedInstructor = rowInstructorMeta?.instructorName || instructorMeta.instructorName
       const resolvedSub = rowInstructorMeta?.substituteInstructor || instructorMeta.substituteInstructor
+      const resolvedRaw = rowInstructorMeta?.raw || instructorMeta.raw
       const isSub = !!resolvedSub
       const scheduledInstructor = resolvedInstructor || undefined
       const actualInstructor = resolvedSub || resolvedInstructor || undefined
@@ -158,6 +161,8 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
             program,
             level,
             instructorName: actualInstructor,
+            instructorNameRaw: resolvedRaw || actualInstructor,
+            instructorNameNorm: resolvedRaw ? normalizeForRoster(resolvedRaw) : actualInstructor ? normalizeForRoster(actualInstructor) : undefined,
             scheduledInstructor,
             actualInstructor,
             isSub,
@@ -182,6 +187,8 @@ export function parseIclassproRosterEntries(html: string): { entries: ParsedRost
           program,
           level,
           instructorName: actualInstructor,
+          instructorNameRaw: resolvedRaw || actualInstructor,
+          instructorNameNorm: resolvedRaw ? normalizeForRoster(resolvedRaw) : actualInstructor ? normalizeForRoster(actualInstructor) : undefined,
           scheduledInstructor,
           actualInstructor,
           isSub,
@@ -267,9 +274,10 @@ function normalizeAgeText(raw: string): string | undefined {
   return text
 }
 
-function extractInstructorMeta(section: cheerio.Cheerio<cheerio.Element>): { instructorName?: string; substituteInstructor?: string } {
+function extractInstructorMeta(section: cheerio.Cheerio<cheerio.Element>): { instructorName?: string; substituteInstructor?: string; raw?: string } {
   let instructorName: string | undefined
   let substituteInstructor: string | undefined
+  let raw: string | undefined
 
   const headerText = section.find(".full-width-header").text().replace(/\s+/g, " ").trim()
   if (headerText) {
@@ -279,6 +287,7 @@ function extractInstructorMeta(section: cheerio.Cheerio<cheerio.Element>): { ins
       const headerIsSub = /\*|\(sub\)/i.test(headerInstructor)
       const cleanedHeader = headerInstructor.replace(/\(sub\)/gi, "").replace(/\*/g, "").trim()
       if (cleanedHeader) {
+        raw = headerInstructor
         if (headerIsSub) {
           substituteInstructor = lastFirstToFirstLast(cleanedHeader)
         } else {
@@ -305,10 +314,12 @@ function extractInstructorMeta(section: cheerio.Cheerio<cheerio.Element>): { ins
       const meta = extractInstructorMetaFromText(lines.join("\n"))
       if (!instructorName && meta?.instructorName) instructorName = meta.instructorName
       if (!substituteInstructor && meta?.substituteInstructor) substituteInstructor = meta.substituteInstructor
+      if (!raw && meta?.raw) raw = meta.raw
     } else {
       const meta = extractInstructorMetaFromText(instructorCell.text())
       if (!instructorName && meta?.instructorName) instructorName = meta.instructorName
       if (!substituteInstructor && meta?.substituteInstructor) substituteInstructor = meta.substituteInstructor
+      if (!raw && meta?.raw) raw = meta.raw
     }
   }
 
@@ -317,10 +328,10 @@ function extractInstructorMeta(section: cheerio.Cheerio<cheerio.Element>): { ins
     substituteInstructor = undefined
   }
 
-  return { instructorName, substituteInstructor }
+  return { instructorName, substituteInstructor, raw }
 }
 
-function extractInstructorMetaFromText(raw: string): { instructorName?: string; substituteInstructor?: string } {
+function extractInstructorMetaFromText(raw: string): { instructorName?: string; substituteInstructor?: string; raw?: string } {
   const lines = String(raw || "")
     .split(/\r?\n/)
     .map((line) => line.replace(/\s+/g, " ").trim())
@@ -335,6 +346,7 @@ function extractInstructorMetaFromText(raw: string): { instructorName?: string; 
     const isSub = /\*|\(sub\)/i.test(cleaned)
     const normalized = cleaned.replace(/\(sub\)/gi, "").replace(/\*/g, "").trim()
     if (!normalized) return
+    if (!raw) raw = cleaned
     if (isSub) {
       substituteInstructor = lastFirstToFirstLast(normalized)
     } else if (!instructorName) {
@@ -353,7 +365,7 @@ function extractInstructorMetaFromText(raw: string): { instructorName?: string; 
     substituteInstructor = undefined
   }
 
-  return { instructorName, substituteInstructor }
+  return { instructorName, substituteInstructor, raw }
 }
 
 function parseDateRangeFromSectionText(text: string) {
@@ -506,4 +518,13 @@ function splitProgramLevel(programText: string): { program?: string; level?: str
     return { program: parts[0].trim(), level: parts.slice(1).join(":").trim() }
   }
   return { program: text }
+}
+
+function normalizeForRoster(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\\([^)]*\\)/g, ' ')
+    .replace(/[.,]/g, ' ')
+    .replace(/\\s+/g, ' ')
+    .trim()
 }

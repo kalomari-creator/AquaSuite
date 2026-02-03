@@ -1,4 +1,4 @@
-import { normalizeName } from ../../utils/normalizeName.js
+import { normalizeName } from '../../utils/normalizeName.js'
 
 export type IntakePayload = {
   gmailMessageId: string
@@ -32,7 +32,7 @@ export function parseIntakeFromEmail(subject: string, body: string, gmailMessage
     rawBody: body
   }
 
-  const subjectMatch = subject.match(/^New Intake\s+—\s+(.+?)\s*\((.+)\)\s*$/)
+  const subjectMatch = subject.match(/^New Intake\s+-\s+(.+?)\s*\((.+)\)\s*$/)
   if (subjectMatch) {
     payload.clientName = subjectMatch[1].trim()
     payload.locationNameRaw = subjectMatch[2].trim()
@@ -44,7 +44,7 @@ export function parseIntakeFromEmail(subject: string, body: string, gmailMessage
   const extractValue = (label: string) => {
     const line = findLine(label)
     if (!line) return undefined
-    return line.split(:).slice(1).join(:).trim()
+    return line.split(':').slice(1).join(':').trim()
   }
   const extractNextLine = (label: string) => {
     const idx = findLineIndex(label)
@@ -54,16 +54,16 @@ export function parseIntakeFromEmail(subject: string, body: string, gmailMessage
     return next.trim()
   }
 
-  payload.locationNameRaw = payload.locationNameRaw || extractValue(Location)
-  payload.preferredDay = extractValue(Preferred day)
-  payload.preferredTime = extractValue(Preferred time)
-  payload.contactPhone = extractValue(Contact Phone) || extractValue(Phone)
-  payload.contactEmail = extractValue(Contact Email) || extractValue(Email)
-  payload.instructorPrimary = extractValue(Primary)
-  payload.instructorSecondary = extractValue(Secondary)
-  payload.code = extractValue(Code)
+  payload.locationNameRaw = payload.locationNameRaw || extractValue('Location')
+  payload.preferredDay = extractValue('Preferred day')
+  payload.preferredTime = extractValue('Preferred time')
+  payload.contactPhone = extractValue('Contact Phone') || extractValue('Phone')
+  payload.contactEmail = extractValue('Contact Email') || extractValue('Email')
+  payload.instructorPrimary = extractValue('Primary')
+  payload.instructorSecondary = extractValue('Secondary')
+  payload.code = extractValue('Code')
 
-  const contactLine = extractValue(Contact) || findLine(Contact)
+  const contactLine = extractValue('Contact') || findLine('Contact')
   if (contactLine) {
     const phoneMatch = contactLine.match(/phone\s*:\s*([+()\d\s-]+)/i)
     if (phoneMatch && !payload.contactPhone) payload.contactPhone = phoneMatch[1].trim()
@@ -71,16 +71,16 @@ export function parseIntakeFromEmail(subject: string, body: string, gmailMessage
     if (emailMatch && !payload.contactEmail) payload.contactEmail = emailMatch[1].trim()
   }
 
-  const scoreGoal = extractValue(Goal Score)
+  const scoreGoal = extractValue('Goal Score')
   if (scoreGoal) payload.scoreGoal = Number(scoreGoal) || undefined
-  const scoreStructure = extractValue(Structure Score)
+  const scoreStructure = extractValue('Structure Score')
   if (scoreStructure) payload.scoreStructure = Number(scoreStructure) || undefined
-  const scoreConnection = extractValue(Connection Score)
+  const scoreConnection = extractValue('Connection Score')
   if (scoreConnection) payload.scoreConnection = Number(scoreConnection) || undefined
-  const scoreValue = extractValue(Value Score)
+  const scoreValue = extractValue('Value Score')
   if (scoreValue) payload.scoreValue = Number(scoreValue) || undefined
 
-  const scoresLine = extractValue(Scores) || findLine(Scores)
+  const scoresLine = extractValue('Scores') || findLine('Scores')
   if (scoresLine) {
     const goal = scoresLine.match(/Goal\s*(\d+)/i)
     const structure = scoresLine.match(/Structure\s*(\d+)/i)
@@ -92,17 +92,17 @@ export function parseIntakeFromEmail(subject: string, body: string, gmailMessage
     if (value && payload.scoreValue === undefined) payload.scoreValue = Number(value[1])
   }
 
-  payload.level = extractValue(Level)
-  payload.ratio = extractValue(Ratio)
-  payload.why = extractValue(Why)
-  payload.enrollmentLink = extractValue(Enrollment Link) || extractNextLine(Enrollment Link)
-  if (payload.enrollmentLink && !payload.enrollmentLink.startsWith(http)) {
+  payload.level = extractValue('Level')
+  payload.ratio = extractValue('Ratio')
+  payload.why = extractValue('Why')
+  payload.enrollmentLink = extractValue('Enrollment Link') || extractNextLine('Enrollment Link')
+  if (payload.enrollmentLink && !payload.enrollmentLink.startsWith('http')) {
     const maybe = extractNextLine(payload.enrollmentLink)
-    if (maybe && maybe.startsWith(http)) payload.enrollmentLink = maybe
+    if (maybe && maybe.startsWith('http')) payload.enrollmentLink = maybe
   }
 
   if (!payload.clientName) {
-    const nameLine = extractValue(Name)
+    const nameLine = extractValue('Name')
     if (nameLine) payload.clientName = nameLine
   }
 

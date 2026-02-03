@@ -1,5 +1,30 @@
+# secrets
 .env
+.env.*
+*.pem
+*.key
+
+# deps/build
 node_modules/
+dist/
+build/
+coverage/
+
+# runtime/data
+runtime/
+data/
+DBNAME
+EXPORTS/
+REPORTS/
 uploads/
+*.db
+*.sqlite
+*.sqlite3
+
+# logs
 *.log
+runlog.txt
+
+# OS/editor
 .DS_Store
+.vscode/

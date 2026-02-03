@@ -1,29 +1,17 @@
 # AquaSuite Web V1
 
-## Where it lives
-- Source: `aquasuite_app/web_v1/`
-- Deployed: `/var/www/aquasuite`
+## Overview
+Static web app built with Vite. Source lives in /web; build outputs to /dist.
 
-## Auth
-- Login via `/api/auth/login`
-- Token stored in `localStorage` (`aqua_token`)
+## Build
+- npm install
+- npm run build
 
-## API endpoints used
-- `GET /api/locations`
-- `GET /api/roster-entries`
-- `GET /api/roster-entries/mine`
-- `POST /api/uploads/roster`
-- `POST /api/attendance`
-- `POST /api/attendance/bulk`
-- `GET /api/roster-uploads`
+## Deploy
+- Copy /dist to a staging dir
+- Atomic swap into /var/www/aquasuite
+- Ensure version.json cache-busting behavior remains
 
-## Role behavior
-- Default view is “My Schedule” for role key `staff`
-- Users can toggle to “Full Roster”
-
-## Manual test
-1) Login
-2) Select location/date
-3) Upload roll sheet
-4) Select time block
-5) Mark attendance
+## Safety
+- Do not store secrets in frontend.
+- All access control enforced by the API.

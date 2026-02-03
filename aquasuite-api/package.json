@@ -7,7 +7,11 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "db:up": "dotenv -e .env -- dbmate up",
-    "db:new": "dotenv -e .env -- dbmate new"
+    "db:new": "dotenv -e .env -- dbmate new",
+    "staff:import": "tsx scripts/import_staff_csv.ts",
+    "clients:import": "tsx scripts/import_clients_csv.ts",
+    "gmail:poller": "tsx src/workers/gmail_intake_poller.ts",
+    "reports:import": "tsx scripts/import_reports_folder.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.0",
@@ -18,11 +22,14 @@
     "dotenv": "^16.0.0",
     "fastify": "^4.0.0",
     "nanoid": "^5.1.6",
-    "pg": "^8.11.0"
+    "otplib": "^13.2.1",
+    "pg": "^8.11.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.0",
     "@types/node": "^20.0.0",
+    "@types/qrcode": "^1.5.6",
     "dotenv-cli": "^7.4.4",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
