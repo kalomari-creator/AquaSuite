@@ -3436,23 +3436,37 @@ function renderLocationAdmin() {
   })
 }
 
+function formatLoginError(err) {
+  if (!err) return 'Login failed.'
+  if (err.error) return String(err.error)
+  if (err.message) return String(err.message)
+  return 'Login failed.'
+}
+
 loginForm?.addEventListener('submit', async (event) => {
   event.preventDefault()
-  loginError.textContent = ''
+  if (loginError) loginError.textContent = ''
+  let data
   try {
-    const data = await apiFetch('/auth/login', {
+    data = await apiFetch('/auth/login', {
       method: 'POST',
       body: JSON.stringify({
         username: el('username').value,
         pin: el('pin').value
       })
     })
-    setAuth(data.token, data.user)
-    await bootstrap()
   } catch (err) {
-    loginError.textContent = err?.error || 'Login failed'
+    if (loginError) loginError.textContent = formatLoginError(err)
     setLoggedOut()
+    return
   }
+  setAuth(data.token, data.user)
+  setLoggedIn()
+  bootstrap().catch((err) => {
+    console.error('Bootstrap failed', err)
+    if (loginError) loginError.textContent = formatLoginError(err)
+    setLoggedOut()
+  })
 })
 
 logoutBtn?.addEventListener('click', () => {
