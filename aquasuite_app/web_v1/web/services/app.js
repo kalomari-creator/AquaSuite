@@ -905,6 +905,10 @@ let tourIndex = 0
 let tourKey = null
 
 function showTour(roleKey, viewKey) {
+  if (!tourModal) return
+  const params = new URLSearchParams(window.location.search)
+  const tourEnabled = localStorage.getItem('tourEnabled') === '1' || params.has('tour')
+  if (!tourEnabled) return
   const steps = (tourSteps[roleKey] && tourSteps[roleKey][viewKey]) || null
   if (!steps || !tourModal) return
   const key = `tour_${roleKey}_${viewKey}_${state.user?.id || ''}`

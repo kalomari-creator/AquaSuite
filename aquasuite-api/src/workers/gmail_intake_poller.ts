@@ -1,4 +1,6 @@
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import pg from 'pg'
 import { gmailListMessages, gmailGetMessage, getHeader, extractBody } from '../integrations/gmail/gmail_api.js'
 import { parseIntakeFromEmail } from '../integrations/gmail/gmail_parser.js'
@@ -6,6 +8,8 @@ import { refreshGmailToken } from '../integrations/gmail/oauth.js'
 import { normalizeName } from '../utils/normalizeName.js'
 import { upsertHubspotContact } from '../integrations/hubspot/client.js'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: path.resolve(__dirname, '../../.env') })
 dotenv.config()
 
 const { Pool } = pg

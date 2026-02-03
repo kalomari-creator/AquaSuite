@@ -369,13 +369,18 @@ html[data-layout=phone] .roster-table td::before{
 }
 
 html[data-layout=tablet] #viewRoster{
+  display:block;
+}
+html[data-layout=tablet] #viewRoster > [data-subtab="main"]{
   display:grid;
-  grid-template-columns: minmax(220px, 32%) 1fr;
+  grid-template-columns: minmax(220px, 32%) minmax(0, 1fr);
   gap:14px;
   align-items:start;
 }
-
-html[data-layout=tablet] #viewRoster > .card:first-child{
+html[data-layout=tablet] #viewRoster > [data-subtab="main"] > .card{
+  min-width:0;
+}
+html[data-layout=tablet] #viewRoster > [data-subtab="main"] > .card:first-child{
   position:sticky;
   top:12px;
   align-self:start;
@@ -391,13 +396,18 @@ html[data-layout=tablet] .roster-actions{
 }
 
 html[data-layout=desktop] #viewRoster{
+  display:block;
+}
+html[data-layout=desktop] #viewRoster > [data-subtab="main"]{
   display:grid;
-  grid-template-columns: minmax(240px, 300px) 1fr;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
   gap:14px;
   align-items:start;
 }
-
-html[data-layout=desktop] #viewRoster > .card:first-child{
+html[data-layout=desktop] #viewRoster > [data-subtab="main"] > .card{
+  min-width:0;
+}
+html[data-layout=desktop] #viewRoster > [data-subtab="main"] > .card:first-child{
   position:sticky;
   top:12px;
   align-self:start;

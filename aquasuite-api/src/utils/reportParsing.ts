@@ -217,6 +217,87 @@ export function extractAgedAccounts(html: string): ReportParseResult<AgedAccount
     total: ['total', 'total balance', 'totalbalance']
   }
   const parsed = parseTableRows(html, headerAliases)
+
+  // Special-case: guardian-level aged accounts (bucket columns per row)
+  const $ = cheerio.load(html)
+  const tables = $('table').toArray()
+  for (const table of tables) {
+    const rows = $(table).find('tr').toArray()
+    if (rows.length < 2) continue
+    const headerRow = rows[0]
+    const headerCells = $(headerRow)
+      .find('th,td')
+      .toArray()
+      .map((node) => normalizeHeader(cleanCellText($(node).text())))
+
+    if (!headerCells.length) continue
+    const hasGuardian = headerCells.some((h) => h.includes('guardian'))
+    const hasCurrent = headerCells.some((h) => h.includes('current'))
+    const hasTotal = headerCells.some((h) => h.includes('total'))
+    if (!(hasGuardian && (hasCurrent || hasTotal))) continue
+
+    const bucketLabels: Array<{ label: string; idx: number }> = []
+    headerCells.forEach((header, idx) => {
+      if (!header) return
+      if (header.includes('guardian') || header.includes('phone') || header.includes('address') || header.includes('email')) return
+      if (header.includes('lastpaymentdate') || header.includes('lastpayment')) return
+      if (header.includes('unappliedcredit')) {
+        bucketLabels.push({ label: 'Unapplied Credit', idx })
+        return
+      }
+      if (header.includes('current')) {
+        bucketLabels.push({ label: 'Current', idx })
+        return
+      }
+      if (header.includes('130')) {
+        bucketLabels.push({ label: '1-30', idx })
+        return
+      }
+      if (header.includes('3160')) {
+        bucketLabels.push({ label: '31-60', idx })
+        return
+      }
+      if (header.includes('6190')) {
+        bucketLabels.push({ label: '61-90', idx })
+        return
+      }
+      if (header.includes('91')) {
+        bucketLabels.push({ label: '91+', idx })
+        return
+      }
+      if (header === 'total') {
+        bucketLabels.push({ label: 'Total', idx })
+        return
+      }
+    })
+
+    if (!bucketLabels.length) continue
+    const totals: Record<string, number> = {}
+    let totalFromColumn = 0
+
+    rows.slice(1).forEach((row) => {
+      const cells = $(row).find('td').toArray().map((td) => cleanCellText($(td).text()))
+      if (!cells.length) return
+      const first = cleanCellText(cells[0] || '').toLowerCase()
+      if (first.startsWith('totals')) return
+
+      bucketLabels.forEach(({ label, idx }) => {
+        if (!(label in totals) && label !== 'Total') totals[label] = 0
+        const val = parseMoney(cells[idx] || '')
+        if (val === null) return
+        totals[label] = (totals[label] || 0) + val
+        if (label === 'Total') totalFromColumn += val
+      })
+    })
+
+    const overall = totalFromColumn || Object.entries(totals).filter(([k]) => k !== 'Total').reduce((sum, [, v]) => sum + v, 0)
+    const rowsOut: AgedAccountsRow[] = Object.entries(totals)
+      .filter(([label]) => label !== 'Total')
+      .map(([label, amount]) => ({ bucket: label, amount, total: overall }))
+
+    if (rowsOut.length) return { rows: rowsOut, warnings }
+  }
+
   if (!parsed) return { rows: [], warnings: ['table_not_found'] }
 
   const rows: AgedAccountsRow[] = []
@@ -243,8 +324,8 @@ export function extractAgedAccounts(html: string): ReportParseResult<AgedAccount
 export function extractDropList(html: string): ReportParseResult<DropListRow> {
   const warnings: string[] = []
   const headerAliases = {
-    date: ['drop date', 'date', 'drop'],
-    swimmer: ['student', 'swimmer', 'name', 'child'],
+    date: ['drop date'],
+    swimmer: ['student', 'swimmer', 'child'],
     reason: ['reason', 'drop reason', 'notes']
   }
   const parsed = parseTableRows(html, headerAliases)
@@ -270,8 +351,8 @@ export function extractDropList(html: string): ReportParseResult<DropListRow> {
 export function extractEnrollmentEvents(html: string): ReportParseResult<EnrollmentRow> {
   const warnings: string[] = []
   const headerAliases = {
-    date: ['enrollment date', 'date', 'start date', 'new enrollment'],
-    swimmer: ['student', 'swimmer', 'name', 'child']
+    date: ['start date', 'enrollment date', 'created date', 'new enrollment'],
+    swimmer: ['student', 'swimmer', 'child']
   }
   const parsed = parseTableRows(html, headerAliases)
   if (!parsed) return { rows: [], warnings: ['table_not_found'] }
@@ -295,9 +376,9 @@ export function extractAcneLeads(html: string): ReportParseResult<AcneLeadRow> {
   const warnings: string[] = []
   const headerAliases = {
     date: ['account created', 'created', 'lead date', 'date'],
-    name: ['name', 'student', 'swimmer', 'account', 'lead'],
+    name: ['guardian', 'guardians', 'account', 'lead', 'name'],
     email: ['email', 'email address'],
-    phone: ['phone', 'phone number', 'mobile']
+    phone: ['primary phone', 'phone', 'phone number', 'mobile']
   }
   const parsed = parseTableRows(html, headerAliases)
   if (!parsed) return { rows: [], warnings: ['table_not_found'] }

@@ -5,6 +5,7 @@ import cors from '@fastify/cors'
 import websocket from '@fastify/websocket'
 import multipart from '@fastify/multipart'
 import dotenv from 'dotenv'
+import { fileURLToPath } from 'url'
 import pg from 'pg'
 import bcrypt from 'bcrypt'
 import crypto from 'crypto'
@@ -21,6 +22,8 @@ import { fetchHomebaseEmployees, fetchHomebaseShifts } from './integrations/home
 import { hubspotConfigured, fetchHubspotContacts, searchHubspotContactByEmail } from './integrations/hubspot/client.js'
 import * as totp from './services/totp.js'
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
 dotenv.config()
 
 const { Pool } = pg
@@ -53,6 +56,30 @@ function daysFromNow(days: number) {
 }
 function formatDate(date: Date) {
   return date.toISOString().slice(0, 10)
+}
+
+let cachedDefaultLocationId: string | null = null
+async function resolveDefaultLocationId() {
+  if (cachedDefaultLocationId) return cachedDefaultLocationId
+  const defaultKey = (getDefaultLocationKey() || '').toUpperCase()
+  if (defaultKey) {
+    const match = await pool.query(
+      `SELECT id FROM locations WHERE upper(code)=$1 OR upper(state)=$1 ORDER BY name LIMIT 1`,
+      [defaultKey]
+    )
+    if (match.rowCount) {
+      cachedDefaultLocationId = match.rows[0].id
+      return cachedDefaultLocationId
+    }
+  }
+  const fallback = await pool.query(`SELECT id FROM locations ORDER BY name LIMIT 1`)
+  cachedDefaultLocationId = fallback.rowCount ? fallback.rows[0].id : null
+  return cachedDefaultLocationId
+}
+
+async function resolveIntegrationLocationId(locationId: string | null) {
+  if (locationId) return locationId
+  return await resolveDefaultLocationId()
 }
 
 async function getUserRoleKey(userId: string) {
@@ -345,7 +372,7 @@ async function upsertContactFromLead(locationId: string | null, source: string, 
            phone=COALESCE($3, phone),
            source=COALESCE($4, source),
            updated_at=now()
-       WHERE id=$12`,
+       WHERE id=$5`,
       [fullName, email, phone, source, current.id]
     )
     return current.id
@@ -372,6 +399,8 @@ async function upsertIntegrationStatus(provider: string, locationId: string | nu
   lastError?: string | null
   meta?: any
 }) {
+  const resolvedLocationId = await resolveIntegrationLocationId(locationId)
+  if (!resolvedLocationId) return
   await pool.query(
     `INSERT INTO integration_status
       (provider, location_id, last_synced_at, last_success_at, last_error, meta, updated_at)
@@ -384,7 +413,7 @@ async function upsertIntegrationStatus(provider: string, locationId: string | nu
        updated_at=now()`,
     [
       provider,
-      locationId || null,
+      resolvedLocationId,
       fields.lastSyncedAt || null,
       fields.lastSuccessAt || null,
       fields.lastError || null,
@@ -394,11 +423,13 @@ async function upsertIntegrationStatus(provider: string, locationId: string | nu
 }
 
 async function getIntegrationStatus(provider: string, locationId: string | null) {
+  const resolvedLocationId = await resolveIntegrationLocationId(locationId)
+  if (!resolvedLocationId) return null
   const res = await pool.query(
     `SELECT provider, location_id, last_synced_at, last_success_at, last_error, meta
      FROM integration_status
      WHERE provider=$1 AND location_id IS NOT DISTINCT FROM $2`,
-    [provider, locationId || null]
+    [provider, resolvedLocationId]
   )
   return res.rows[0] || null
 }
@@ -1877,6 +1908,7 @@ app.post('/reports/preflight', async (req, reply) => {
     })
   }
 
+  if (preflight.reportType === 'unknown') preflight.reportType = null
   if (!preflight.reportType && reportTypeHint) preflight.reportType = reportTypeHint
   return reply.send({
     ok: true,
@@ -1963,6 +1995,7 @@ app.post('/reports/upload', async (req, reply) => {
   const storedPath = path.join(uploadsDir, storedName)
   await fs.writeFile(storedPath, html, 'utf8')
 
+  if (preflight.reportType === 'unknown') preflight.reportType = null
   const resolvedReportType = preflight.reportType || reportTypeHint || 'report'
   const uploadRes = await pool.query(
     `INSERT INTO report_uploads
