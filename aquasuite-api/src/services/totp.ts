@@ -10,10 +10,11 @@ const RATE_LIMIT_ATTEMPTS = 5
 const RATE_LIMIT_LOCKOUT_MINUTES = 15
 const TOKEN_REPLAY_WINDOW_SECONDS = 60
 
-// Create TOTP instance with 30-second window and 1 step drift tolerance
+// Create TOTP instance with 30-second window and 2 step drift tolerance (±60 seconds)
+// This accounts for device clock drift that commonly occurs on mobile devices
 const totpInstance = new TOTP({
   step: 30,
-  window: 1
+  window: 2  // Allow ±2 steps (±60 seconds) for clock drift tolerance
 })
 
 export interface TotpService {

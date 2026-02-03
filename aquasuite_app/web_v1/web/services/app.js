@@ -326,6 +326,49 @@ const homebaseSyncCard = el('homebaseSyncCard')
 const homebaseSyncBtn = el('homebaseSyncBtn')
 const homebaseSyncStatus = el('homebaseSyncStatus')
 const homebaseSyncList = el('homebaseSyncList')
+const appFooter = el('appFooter')
+const footerVersion = el('footerVersion')
+const undoToast = el('undoToast')
+const undoToastMessage = el('undoToastMessage')
+const undoToastBtn = el('undoToastBtn')
+const undoToastDismiss = el('undoToastDismiss')
+
+let pendingUndo = null
+let undoTimer = null
+
+function showUndoToast(message, undoFn, timeoutMs = 8000) {
+  if (undoTimer) clearTimeout(undoTimer)
+  pendingUndo = undoFn
+  if (undoToastMessage) undoToastMessage.textContent = message
+  if (undoToast) undoToast.classList.remove('hidden')
+  undoTimer = setTimeout(() => {
+    hideUndoToast()
+    pendingUndo = null
+  }, timeoutMs)
+}
+
+function hideUndoToast() {
+  if (undoToast) undoToast.classList.add('hidden')
+  if (undoTimer) clearTimeout(undoTimer)
+}
+
+function executeUndo() {
+  if (typeof pendingUndo === 'function') {
+    pendingUndo()
+  }
+  pendingUndo = null
+  hideUndoToast()
+}
+
+undoToastBtn?.addEventListener('click', executeUndo)
+undoToastDismiss?.addEventListener('click', hideUndoToast)
+
+function updateFooterVersion() {
+  if (!footerVersion || !state.version) return
+  const ver = state.version.version || state.version.builtAt || 'dev'
+  footerVersion.textContent = `AquaSuite v${ver}`
+  if (appFooter) appFooter.classList.remove('hidden')
+}
 
 const locationPrefKey = 'aqua_location_id'
 const qaRolePrefKey = 'qa_role_preview'
@@ -4121,6 +4164,7 @@ async function bootstrap() {
   setLoggedIn()
 
   await loadVersion()
+  updateFooterVersion()
   await loadMeta()
   if (userInfo) userInfo.textContent = state.user ? `${state.user.firstName || ''} ${state.user.lastName || ''} • ${getEffectiveRoleLabel()}` : ''
   await loadLocations()
