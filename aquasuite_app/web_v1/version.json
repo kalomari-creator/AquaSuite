@@ -1,0 +1,10 @@
+{
+  "version": "0.2",
+  "builtAt": "2026-02-03T05:46:33.951Z",
+  "notes": [
+    "Announcer-aligned roster UI with filters, time blocks, and SSP flow",
+    "Uploads per report type with confirmation + history",
+    "Manager reports with charts and CSV export",
+    "Homebase and HubSpot integration status panels"
+  ]
+}

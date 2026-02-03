@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>AquaSuite Roster</title>
   <link rel="stylesheet" href="/web/components/styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -34,6 +35,7 @@
           <div class="contextLine"><span id="contextLocation">Location</span> · <span id="contextDate"></span></div>
         </div>
         <div class="spacer"></div>
+        <div id="userInfo" class="muted tiny"></div>
         <button class="iconBtn" id="gearBtn">⚙️</button>
       </div>
 
@@ -87,7 +89,7 @@
               <option value="">Actual role</option>
               <option value="admin">Admin</option>
               <option value="manager">Manager</option>
-              <option value="instructor">Instructor</option>
+              <option value="instructor">Aquatics Staff</option>
               <option value="readonly">Readonly</option>
             </select>
           </label>
@@ -117,7 +119,7 @@
           <div class="row">
             <div class="pill">Roster Upload</div>
             <div class="spacer"></div>
-            <button class="secondary miniBtn" id="uploadConfirmBtn" type="button">Upload</button>
+            <button class="secondary miniBtn uploadConfirmTrigger" type="button">Upload</button>
           </div>
           <div class="row" style="margin-top:6px;">
             <input type="file" id="rosterFile" accept=".html,.htm" />
@@ -128,10 +130,13 @@
 
         <div class="card" id="timeBlockCard">
           <div class="row">
-            <div class="pill">Time Blocks</div>
-            <div class="spacer"></div>
-            <button class="secondary miniBtn" id="timeBlockToggle" type="button">All times</button>
-          </div>
+          <div class="pill">Time Blocks</div>
+          <div class="pill" id="homebaseShiftStatus">On shift: —</div>
+          <div class="spacer"></div>
+          <label class="tiny">Time
+            <select id="timeBlockSelect"></select>
+          </label>
+        </div>
           <div id="timeActive" class="time-active">No class selected</div>
           <div id="timeBlocks" class="blocks hidden"></div>
           <div class="hint" id="timeBlockStatus"></div>
@@ -139,10 +144,38 @@
 
         <div class="card">
           <div class="row rosterToolbar">
-            <div class="pill">Roster</div>
+            <div class="pill">Roster <span id="rosterMeta" class="muted tiny"></span></div>
             <div class="spacer"></div>
+            <div class="searchWrap">
+              <input class="searchInput" id="rosterSearch" type="text" placeholder="Search swimmers, instructors..." />
+              <button class="searchClear hidden" id="searchClear" type="button">×</button>
+            </div>
+            <button class="secondary miniBtn" id="filtersToggle" type="button">Filters</button>
             <div class="saveStatus" id="rosterSaveStatus"></div>
           </div>
+          <div id="filtersPanel" class="filters-panel open">
+            <label class="tiny">Aquatics Staff
+              <select id="instructorFilter"></select>
+            </label>
+            <label class="tiny">Sort
+              <select id="sortBy">
+                <option value="instructor">Aquatics Staff</option>
+                <option value="name">Swimmer</option>
+              </select>
+            </label>
+            <div class="buttonGroup">
+              <button class="secondary miniBtn" id="bulkMarkPresent" type="button">Mark present</button>
+              <button class="secondary miniBtn" id="bulkClearAttendance" type="button">Clear attendance</button>
+            </div>
+            <div class="buttonGroup">
+              <button class="secondary miniBtn" id="classNoteBtn" type="button">Class note</button>
+              <button class="secondary miniBtn" id="printRosterBtn" type="button">Print</button>
+            </div>
+            <div class="buttonGroup">
+              <button class="secondary miniBtn" id="rosterSaveViewBtn" type="button">Save view</button>
+            </div>
+          </div>
+          <div id="rosterSavedViews" class="list"></div>
 
           <div class="table-scroll">
             <table class="roster-table dense">
@@ -153,9 +186,10 @@
                 <th style="width:70px;">Age</th>
                 <th style="width:130px;">Type</th>
                 <th style="width:120px;">Level</th>
-                <th style="width:150px;">Instructor</th>
+                <th style="width:150px;">Aquatics Staff</th>
                 <th style="width:70px;">Zone</th>
                 <th style="width:90px;">Notes</th>
+                <th style="width:120px;">Actions</th>
               </tr>
             </thead>
             <tbody id="rosterTable"></tbody>
@@ -163,13 +197,30 @@
           </div>
 
           <div id="rosterEmpty" class="hint muted">Select a location and date to load roster.</div>
+          <div id="rosterActionDock" class="actionDock">
+            <button class="secondary miniBtn" id="addSwimmerBtn" type="button">+ Add swimmer</button>
+          </div>
+          <div class="card hidden" id="eodCloseCard">
+            <div class="row">
+              <div class="pill">End of Day</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="eodRefresh" type="button">Refresh</button>
+              <button class="secondary miniBtn" id="eodCloseBtn" type="button">Close day</button>
+              <button class="secondary miniBtn" id="eodReopenBtn" type="button">Reopen</button>
+            </div>
+            <div class="kpi-row" style="margin-top:8px;">
+              <div class="kpi" id="eodStatus">Day status</div>
+              <div class="kpi" id="eodSummary">Summary</div>
+            </div>
+            <div id="eodAlerts" class="list" style="margin-top:10px;"></div>
+          </div>
         </div>
       </section>
 
 <section id="viewObservations" class="hidden">
         <div class="card">
           <div class="row">
-            <div class="pill">Instructor Observation</div>
+            <div class="pill">Aquatics Staff Observation</div>
             <div class="spacer"></div>
             <div class="tabs" style="margin-top:0;">
               <button class="tab active" id="obsFormTab" data-obs="form">Observation Form</button>
@@ -187,8 +238,8 @@
               <label class="tiny">Class
                 <select id="obsClassSelect"></select>
               </label>
-              <label class="tiny">Instructor
-                <input id="obsInstructor" type="text" placeholder="Instructor name" />
+              <label class="tiny">Aquatics Staff
+                <input id="obsInstructor" type="text" placeholder="Aquatics staff name" />
                 <div class="muted tiny" id="obsInstructorMeta"></div>
               </label>
               <label class="tiny inline">
@@ -228,107 +279,352 @@
         </div>
       </section>
       <section id="viewUploads" class="hidden">
-        <div class="card">
-          <div class="row">
-            <div>
-              <h3>Upload Roll Sheet</h3>
-              <p class="muted tiny">Upload iClassPro condensed HTML roll sheet.</p>
-            </div>
-          </div>
-          <form id="uploadForm" class="row" style="margin-top:8px;">
-            <input type="file" id="uploadRosterFile" accept=".html,.htm" />
-            <button class="primary" type="submit">Upload</button>
-          </form>
-          <div class="hint" id="uploadStatusUploads"></div>
+        <div class="tabs page-tabs" id="uploadsTabs">
+          <button class="tab" data-subtab-btn="daily-roster">Daily Roster Upload</button>
+          <button class="tab" data-subtab-btn="acne-upload">ACNE Upload</button>
+          <button class="tab" data-subtab-btn="new-enrollments-upload">New Enrollments Upload</button>
+          <button class="tab" data-subtab-btn="retention-upload">Aquatics Staff Retention Upload</button>
+          <button class="tab" data-subtab-btn="aged-accounts-upload">Aged Accounts Upload</button>
+          <button class="tab" data-subtab-btn="drop-list-upload">Drop List Upload</button>
+          <button class="tab" data-subtab-btn="upload-history">Upload History</button>
         </div>
-        <div class="card">
-          <div class="row">
-            <div class="pill">Recent uploads</div>
+
+        <div data-subtab="daily-roster">
+          <div class="card">
+            <div class="row">
+              <div>
+                <h3>Daily Roster Upload</h3>
+                <p class="muted tiny">Upload iClassPro condensed HTML roll sheet for the selected location/date.</p>
+              </div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="uploadConfirmBtn" type="button">Upload</button>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <input type="file" id="uploadRosterFile" accept=".html,.htm" />
+            </div>
+            <div class="hint" id="uploadStatusUploads"></div>
           </div>
-          <div id="uploadList" class="list"></div>
+        </div>
+
+        <div data-subtab="acne-upload">
+          <div class="card report-upload" data-report-type="acne">
+            <div class="row">
+              <div class="pill">ACNE Upload</div>
+            </div>
+            <input type="file" data-report-file="acne" accept=".html,.htm" />
+            <div class="row" style="margin-top:6px;">
+              <button class="secondary miniBtn" data-report-preflight="acne" type="button">Preflight</button>
+              <button class="primary miniBtn" data-report-upload="acne" type="button">Upload</button>
+            </div>
+            <div class="hint" data-report-status="acne"></div>
+            <div class="list" data-report-summary="acne"></div>
+          </div>
+        </div>
+
+        <div data-subtab="new-enrollments-upload">
+          <div class="card report-upload" data-report-type="new_enrollments">
+            <div class="row">
+              <div class="pill">New Enrollments Upload</div>
+            </div>
+            <input type="file" data-report-file="new_enrollments" accept=".html,.htm" />
+            <div class="row" style="margin-top:6px;">
+              <button class="secondary miniBtn" data-report-preflight="new_enrollments" type="button">Preflight</button>
+              <button class="primary miniBtn" data-report-upload="new_enrollments" type="button">Upload</button>
+            </div>
+            <div class="hint" data-report-status="new_enrollments"></div>
+            <div class="list" data-report-summary="new_enrollments"></div>
+          </div>
+        </div>
+
+        <div data-subtab="retention-upload">
+          <div class="card report-upload" data-report-type="instructor_retention">
+            <div class="row">
+              <div class="pill">Aquatics Staff Retention</div>
+            </div>
+            <input type="file" data-report-file="instructor_retention" accept=".html,.htm" />
+            <div class="row" style="margin-top:6px;">
+              <button class="secondary miniBtn" data-report-preflight="instructor_retention" type="button">Preflight</button>
+              <button class="primary miniBtn" data-report-upload="instructor_retention" type="button">Upload</button>
+            </div>
+            <div class="hint" data-report-status="instructor_retention"></div>
+            <div class="list" data-report-summary="instructor_retention"></div>
+          </div>
+        </div>
+
+        <div data-subtab="aged-accounts-upload">
+          <div class="card report-upload" data-report-type="aged_accounts">
+            <div class="row">
+              <div class="pill">Aged Accounts</div>
+            </div>
+            <input type="file" data-report-file="aged_accounts" accept=".html,.htm" />
+            <div class="row" style="margin-top:6px;">
+              <button class="secondary miniBtn" data-report-preflight="aged_accounts" type="button">Preflight</button>
+              <button class="primary miniBtn" data-report-upload="aged_accounts" type="button">Upload</button>
+            </div>
+            <div class="hint" data-report-status="aged_accounts"></div>
+            <div class="list" data-report-summary="aged_accounts"></div>
+          </div>
+        </div>
+
+        <div data-subtab="drop-list-upload">
+          <div class="card report-upload" data-report-type="drop_list">
+            <div class="row">
+              <div class="pill">Drop List</div>
+            </div>
+            <input type="file" data-report-file="drop_list" accept=".html,.htm" />
+            <div class="row" style="margin-top:6px;">
+              <button class="secondary miniBtn" data-report-preflight="drop_list" type="button">Preflight</button>
+              <button class="primary miniBtn" data-report-upload="drop_list" type="button">Upload</button>
+            </div>
+            <div class="hint" data-report-status="drop_list"></div>
+            <div class="list" data-report-summary="drop_list"></div>
+          </div>
+        </div>
+
+        <div data-subtab="upload-history">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Upload History</div>
+            </div>
+            <div id="uploadHistoryList" class="list"></div>
+          </div>
         </div>
       </section>
 
       <section id="viewReports" class="hidden">
         <div class="card">
           <div class="row">
-            <div>
-              <h3>Upload Report</h3>
-              <p class="muted tiny">Run preflight before ingesting reports.</p>
+            <div class="pill">Report Filters</div>
+            <div class="spacer"></div>
+            <label class="tiny">Start
+              <input type="date" id="reportStartDate" />
+            </label>
+            <label class="tiny">End
+              <input type="date" id="reportEndDate" />
+            </label>
+            <label class="tiny">Aquatics Staff
+              <select id="reportInstructorFilter"></select>
+            </label>
+            <label class="tiny">Program
+              <select id="reportProgramFilter"></select>
+            </label>
+            <button class="secondary miniBtn" id="reportsRefreshBtn" type="button">Refresh</button>
+          </div>
+          <div class="hint" id="reportsStatus"></div>
+        </div>
+
+        <div class="tabs page-tabs" id="reportsTabs">
+          <button class="tab" data-subtab-btn="enrollment-tracker">Enrollment Tracker</button>
+          <button class="tab" data-subtab-btn="instructor-retention">Aquatics Staff Retention</button>
+          <button class="tab" data-subtab-btn="aged-accounts">Aged Accounts</button>
+          <button class="tab" data-subtab-btn="drop-list">Drop List</button>
+          <button class="tab" data-subtab-btn="contacts">Contacts</button>
+          <button class="tab" data-subtab-btn="roster-health">Roster Health</button>
+        </div>
+
+        <div data-subtab="enrollment-tracker">
+          <div class="card report-card">
+            <div class="row">
+              <div class="pill">Enrollment Tracker (ACNE Conversion Dashboard)</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="enrollmentExportBtn" type="button">Export CSV</button>
             </div>
+            <div class="upload-grid" style="margin-top:10px;">
+              <div class="card report-upload" data-report-type="acne">
+                <div class="row"><div class="pill">ACNE Upload</div></div>
+                <input type="file" data-report-file="acne" accept=".html,.htm" />
+                <div class="row" style="margin-top:6px;">
+                  <button class="secondary miniBtn" data-report-preflight="acne" type="button">Preflight</button>
+                  <button class="primary miniBtn" data-report-upload="acne" type="button">Upload</button>
+                </div>
+                <div class="hint" data-report-status="acne"></div>
+              </div>
+              <div class="card report-upload" data-report-type="new_enrollments">
+                <div class="row"><div class="pill">New Enrollments Upload</div></div>
+                <input type="file" data-report-file="new_enrollments" accept=".html,.htm" />
+                <div class="row" style="margin-top:6px;">
+                  <button class="secondary miniBtn" data-report-preflight="new_enrollments" type="button">Preflight</button>
+                  <button class="primary miniBtn" data-report-upload="new_enrollments" type="button">Upload</button>
+                </div>
+                <div class="hint" data-report-status="new_enrollments"></div>
+              </div>
+              <div class="card report-upload" data-report-type="daily_roster">
+                <div class="row"><div class="pill">Daily Roster Upload</div></div>
+                <input type="file" id="enrollmentRosterFile" accept=".html,.htm" />
+                <div class="row" style="margin-top:6px;">
+                  <button class="secondary miniBtn uploadConfirmTrigger" type="button">Upload</button>
+                </div>
+                <div class="hint" id="uploadStatusEnrollment">Uses selected location/date.</div>
+              </div>
+            </div>
+            <canvas id="enrollmentChart"></canvas>
+            <div id="enrollmentTable" class="list"></div>
           </div>
-          <div class="row" style="margin-top:8px;">
-            <input type="file" id="reportFile" accept=".html,.htm" />
-            <button class="secondary miniBtn" id="reportPreflightBtn">Preflight</button>
-          </div>
-          <div id="reportPreflight" class="list"></div>
-          <label class="row" style="margin-top:8px;">
-            <input type="checkbox" id="reportConfirm" />
-            <span class="muted tiny">I confirm the report location is correct.</span>
-          </label>
-          <button class="primary" id="reportUploadBtn">Upload Report</button>
-          <div class="hint" id="reportStatus"></div>
         </div>
 
-        <div class="card">
-          <div class="row">
-            <div class="pill">V1 Summary</div>
+        <div data-subtab="instructor-retention">
+          <div class="card report-card">
+            <div class="row">
+              <div class="pill">Aquatics Staff Retention</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="retentionExportBtn" type="button">Export CSV</button>
+            </div>
+            <div class="card report-upload" data-report-type="instructor_retention" style="margin-top:10px;">
+              <div class="row"><div class="pill">Upload Retention Report</div></div>
+              <input type="file" data-report-file="instructor_retention" accept=".html,.htm" />
+              <div class="row" style="margin-top:6px;">
+                <button class="secondary miniBtn" data-report-preflight="instructor_retention" type="button">Preflight</button>
+                <button class="primary miniBtn" data-report-upload="instructor_retention" type="button">Upload</button>
+              </div>
+              <div class="hint" data-report-status="instructor_retention"></div>
+            </div>
+            <canvas id="retentionChart"></canvas>
+            <div id="retentionTable" class="list"></div>
           </div>
-          <div id="reportList" class="list"></div>
         </div>
 
-        <div class="card">
-          <div class="row">
-            <button class="secondary miniBtn" id="printRetentionBtn" type="button">Print</button>
-            <div class="pill">Instructor Retention</div>
+        <div data-subtab="aged-accounts">
+          <div class="card report-card">
+            <div class="row">
+              <div class="pill">Aged Accounts</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="agedAccountsExportBtn" type="button">Export CSV</button>
+            </div>
+            <div class="card report-upload" data-report-type="aged_accounts" style="margin-top:10px;">
+              <div class="row"><div class="pill">Upload Aged Accounts Report</div></div>
+              <input type="file" data-report-file="aged_accounts" accept=".html,.htm" />
+              <div class="row" style="margin-top:6px;">
+                <button class="secondary miniBtn" data-report-preflight="aged_accounts" type="button">Preflight</button>
+                <button class="primary miniBtn" data-report-upload="aged_accounts" type="button">Upload</button>
+              </div>
+              <div class="hint" data-report-status="aged_accounts"></div>
+            </div>
+            <canvas id="agedAccountsChart"></canvas>
+            <div id="agedAccountsTable" class="list"></div>
           </div>
-          <div id="retentionTable" class="list"></div>
+        </div>
+
+        <div data-subtab="drop-list">
+          <div class="card report-card">
+            <div class="row">
+              <div class="pill">Drop List</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="dropListExportBtn" type="button">Export CSV</button>
+            </div>
+            <div class="card report-upload" data-report-type="drop_list" style="margin-top:10px;">
+              <div class="row"><div class="pill">Upload Drop List</div></div>
+              <input type="file" data-report-file="drop_list" accept=".html,.htm" />
+              <div class="row" style="margin-top:6px;">
+                <button class="secondary miniBtn" data-report-preflight="drop_list" type="button">Preflight</button>
+                <button class="primary miniBtn" data-report-upload="drop_list" type="button">Upload</button>
+              </div>
+              <div class="hint" data-report-status="drop_list"></div>
+            </div>
+            <canvas id="dropListChart"></canvas>
+            <div id="dropListTable" class="list"></div>
+          </div>
+        </div>
+
+        <div data-subtab="contacts">
+          <div class="card report-card">
+            <div class="row">
+              <div class="pill">Contacts (Client Relations)</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="contactsExportBtn" type="button">Export CSV</button>
+              <button class="secondary miniBtn" id="hubspotSyncBtn" type="button">Sync HubSpot</button>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <input id="contactsSearch" type="text" placeholder="Search contacts..." />
+            </div>
+            <div id="contactsDuplicates" class="list"></div>
+            <div id="contactsTable" class="list"></div>
+          </div>
+        </div>
+
+        <div data-subtab="roster-health">
+          <div class="card report-card" id="rosterHealthCard">
+            <div class="row">
+              <div class="pill">Roster Health</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="rosterHealthExportBtn" type="button">Export CSV</button>
+            </div>
+            <div id="rosterHealthKpis" class="kpi-row" style="margin-top:8px;"></div>
+            <div id="rosterHealthTable" class="list"></div>
+          </div>
         </div>
       </section>
 
       <section id="viewStaff" class="hidden">
-        <div class="card" id="userAdminCard">
-          <div class="row">
-            <div class="pill">User Admin</div>
-            <div class="spacer"></div>
-            <span class="muted tiny">Admins only</span>
-          </div>
-          <div class="row" style="margin-top:8px;">
-            <input id="userAdminFirst" type="text" placeholder="First name" />
-            <input id="userAdminLast" type="text" placeholder="Last name" />
-            <input id="userAdminUsername" type="text" placeholder="Username" />
-            <select id="userAdminRole">
-              <option value="admin">Admin</option>
-              <option value="manager">Manager</option>
-              <option value="instructor">Instructor</option>
-              <option value="readonly">Read Only</option>
-            </select>
-            <div id="userAdminLocations" class="row"></div>
-            <button class="primary miniBtn" id="userAdminCreate" type="button">Create</button>
-          </div>
-          <div class="hint" id="userAdminStatus"></div>
-          <div id="userAdminList" class="list"></div>
-        </div>
-        <div class="card">
-          <div class="row">
-            <div class="pill">Staff Directory</div>
-            <div class="spacer"></div>
-            <input id="staffSearch" type="text" placeholder="Search staff..." />
-          </div>
-          <div id="staffList" class="list"></div>
+        <div class="tabs page-tabs" id="staffTabs">
+          <button class="tab" data-subtab-btn="staff-list">Staff List</button>
+          <button class="tab" data-subtab-btn="roles-access">Roles and Access</button>
+          <button class="tab" data-subtab-btn="homebase-sync">Homebase Sync</button>
         </div>
 
-        <div class="card">
-          <div class="row">
-            <div class="pill">Instructor Matching</div>
-            <div class="spacer"></div>
-            <button class="secondary miniBtn" id="refreshVariants">Refresh</button>
+        <div data-subtab="staff-list">
+          <div class="card" id="userAdminCard">
+            <div class="row">
+              <div class="pill">User Admin</div>
+              <div class="spacer"></div>
+              <span class="muted tiny">Admins only</span>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <input id="userAdminFirst" type="text" placeholder="First name" />
+              <input id="userAdminLast" type="text" placeholder="Last name" />
+              <input id="userAdminUsername" type="text" placeholder="Username" />
+              <select id="userAdminRole">
+                <option value="admin">Admin</option>
+                <option value="manager">Manager</option>
+                <option value="instructor">Aquatics Staff</option>
+                <option value="readonly">Read Only</option>
+              </select>
+              <div id="userAdminLocations" class="row"></div>
+              <button class="primary miniBtn" id="userAdminCreate" type="button">Create</button>
+            </div>
+            <div class="hint" id="userAdminStatus"></div>
+            <div id="userAdminList" class="list"></div>
           </div>
-          <div id="instructorVariants" class="list"></div>
+          <div class="card">
+            <div class="row">
+              <div class="pill">Staff Directory</div>
+              <div class="spacer"></div>
+              <input id="staffSearch" type="text" placeholder="Search staff..." />
+            </div>
+            <div id="staffList" class="list"></div>
+          </div>
+        </div>
+
+        <div data-subtab="roles-access">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Roles and Access</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="refreshVariants">Refresh</button>
+            </div>
+            <div id="instructorVariants" class="list"></div>
+          </div>
+        </div>
+
+        <div data-subtab="homebase-sync">
+          <div class="card" id="homebaseSyncCard">
+            <div class="row">
+              <div class="pill">Homebase Sync</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="homebaseSyncBtn" type="button">Sync Now</button>
+            </div>
+            <div class="hint" id="homebaseSyncStatus"></div>
+            <div id="homebaseSyncList" class="list"></div>
+          </div>
         </div>
       </section>
 
       <section id="viewIntakes" class="hidden">
+        <div class="tabs page-tabs" id="intakesTabs">
+          <button class="tab" data-subtab-btn="google-intakes">Google Intakes</button>
+          <button class="tab" data-subtab-btn="intake-history">Intake History</button>
+          <button class="tab" data-subtab-btn="intake-settings">Intake Settings</button>
+        </div>
+        <div data-subtab="google-intakes">
         <div class="card">
           <div class="row">
             <div class="pill">Client Intakes</div>
@@ -339,7 +635,6 @@
               <option value="new">New</option>
               <option value="contacted">Contacted</option>
               <option value="scheduled">Scheduled</option>
-              <option value="enrolled">Enrolled</option>
               <option value="closed">Closed</option>
             </select>
             <div class="spacer"></div>
@@ -349,18 +644,86 @@
           </div>
           <div id="intakeList" class="list"></div>
         </div>
+        </div>
+        <div data-subtab="intake-history">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Intake History</div>
+            </div>
+            <div class="hint">History view coming soon.</div>
+          </div>
+        </div>
+        <div data-subtab="intake-settings">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Intake Settings</div>
+            </div>
+            <div class="hint">Configure intake parsing and mappings here.</div>
+          </div>
+        </div>
       </section>
 
       <section id="viewLocations" class="hidden">
-        <div class="card">
-          <div class="row">
-            <div class="pill">Locations</div>
+        <div class="tabs page-tabs" id="locationsTabs">
+          <button class="tab" data-subtab-btn="location-list">Location List</button>
+          <button class="tab" data-subtab-btn="add-location">Add Location</button>
+          <button class="tab" data-subtab-btn="location-settings">Location Settings</button>
+        </div>
+
+        <div data-subtab="location-list">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Locations</div>
+            </div>
+            <div id="locationAdminList" class="list"></div>
           </div>
-          <div id="locationAdminList" class="list"></div>
+        </div>
+
+        <div data-subtab="add-location">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Add Location</div>
+            </div>
+            <div class="row" style="margin-top:8px;">
+              <input id="locationAddName" type="text" placeholder="Location name" />
+              <input id="locationAddCode" type="text" placeholder="Location code" />
+              <input id="locationAddState" type="text" placeholder="State" />
+              <input id="locationAddTimezone" type="text" placeholder="Timezone (e.g. America/New_York)" />
+              <button class="primary miniBtn" id="locationAddBtn" type="button">Add Location</button>
+            </div>
+            <div class="hint" id="locationAddStatus"></div>
+          </div>
+        </div>
+
+        <div data-subtab="location-settings">
+          <div class="card" id="integrationStatusCard">
+            <div class="row">
+              <div class="pill">Integrations</div>
+              <div class="spacer"></div>
+              <span class="muted tiny">Admin only</span>
+            </div>
+            <div id="integrationStatusList" class="list"></div>
+          </div>
         </div>
       </section>
 
       <section id="viewActivity" class="hidden">
+        <div class="card" id="billingQueueCard">
+          <div class="row">
+            <div class="pill">Billing Queue</div>
+            <div class="spacer"></div>
+            <select id="billingStatusFilter">
+              <option value="">All statuses</option>
+              <option value="open">Open</option>
+              <option value="in_progress">In progress</option>
+              <option value="waiting_customer">Waiting customer</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+            <button class="secondary miniBtn" id="billingRefreshBtn" type="button">Refresh</button>
+          </div>
+          <div id="billingQueueList" class="list"></div>
+        </div>
         <div class="card">
           <div class="row">
             <div class="pill">System Activity</div>
@@ -407,13 +770,29 @@
 
 
       <section id="viewNotifications" class="hidden">
-        <div class="card">
-          <div class="row">
-            <div class="pill">Instructor Notifications</div>
-            <div class="spacer"></div>
-            <button class="secondary miniBtn" id="notificationsRefresh" type="button">Refresh</button>
+        <div class="tabs page-tabs" id="notificationsTabs">
+          <button class="tab" data-subtab-btn="general">General</button>
+          <button class="tab" data-subtab-btn="manager">Manager</button>
+        </div>
+        <div data-subtab="general">
+          <div class="card">
+            <div class="row">
+              <div class="pill">General Notifications</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="notificationsRefresh" type="button">Refresh</button>
+            </div>
+            <div id="notificationList" class="list"></div>
           </div>
-          <div id="notificationList" class="list"></div>
+        </div>
+        <div data-subtab="manager">
+          <div class="card">
+            <div class="row">
+              <div class="pill">Manager Notifications</div>
+              <div class="spacer"></div>
+              <button class="secondary miniBtn" id="managerNotificationsRefresh" type="button">Refresh</button>
+            </div>
+            <div id="managerNotificationList" class="list"></div>
+          </div>
         </div>
       </section>
       <section id="viewAnnouncer" class="hidden">
@@ -427,7 +806,8 @@
         </div>
       </section>
     </div>
-  
+    </div>
+
   <div id="commandPaletteModal" class="modal hidden">
     <div class="modal-card">
       <div class="row">
@@ -493,11 +873,32 @@
         <button class="primary" id="rosterNoteSave">Save</button>
         <button class="secondary" id="rosterNoteClear">Clear</button>
         <button class="secondary" id="sspPassBtn">Passed SSP</button>
+        <button class="secondary" id="sspRevokeBtn">Revoke SSP</button>
+        <button class="secondary" id="billingFlagBtn">Billing Flag</button>
       </div>
       <div class="hint" id="sspStatus"></div>
     </div>
   </div>
 
+
+  <div id="reportConfirmModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="row">
+        <h3 style="margin:0;">Confirm Report Upload</h3>
+        <div class="spacer"></div>
+        <button class="secondary miniBtn" id="reportConfirmClose">Close</button>
+      </div>
+      <div class="hint" id="reportConfirmSummary"></div>
+      <label class="tiny" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+        <input type="checkbox" id="reportConfirmCheckbox" />
+        Confirm location + report type are correct.
+      </label>
+      <div class="row" style="margin-top:8px;">
+        <button class="primary" id="reportConfirmRun">Confirm Upload</button>
+      </div>
+      <div class="hint" id="reportConfirmStatus"></div>
+    </div>
+  </div>
 
   <div id="uploadConfirmModal" class="modal hidden">
     <div class="modal-card">
@@ -507,6 +908,13 @@
         <button class="secondary miniBtn" id="uploadConfirmClose">Close</button>
       </div>
       <div class="hint" id="uploadConfirmSummary"></div>
+      <label class="tiny" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+        Mode
+        <select id="uploadMergeMode">
+          <option value="merge">Merge (recommended)</option>
+          <option value="replace">Replace existing day</option>
+        </select>
+      </label>
       <div class="row" style="margin-top:8px;">
         <button class="primary" id="uploadConfirmRun">Confirm Upload</button>
       </div>
@@ -525,7 +933,7 @@
         <label>Age<input id="addSwimmerAge" type="text" /></label>
         <label>Program<input id="addSwimmerProgram" type="text" /></label>
         <label>Level<input id="addSwimmerLevel" type="text" /></label>
-        <label>Instructor<input id="addSwimmerInstructor" type="text" /></label>
+        <label>Aquatics Staff<input id="addSwimmerInstructor" type="text" /></label>
         <label>Zone<input id="addSwimmerZone" type="number" /></label>
       </div>
       <div class="row" style="margin-top:8px;">
@@ -545,6 +953,7 @@
     </div>
   </div>
 
+  </div>
   <script>
     (function(){
       function load(v){

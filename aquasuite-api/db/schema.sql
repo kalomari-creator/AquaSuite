@@ -1,4 +1,4 @@
-\restrict 3fJ2yrgnGk8G9matvlZrr2UBpIAdcY8zJkrqn6lhJbLrRFpm3MeHu87mx5VrUTO
+\restrict QkhTM8xybWcR88lpoTp6POfsiHrmkOyFO97Y1LysVZTEzLwwLjZJ49kOI4dh5gz
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
@@ -72,6 +72,22 @@ $$;
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
+
+--
+-- Name: acne_leads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.acne_leads (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    lead_date date,
+    full_name text,
+    email text,
+    phone text,
+    source_upload_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
 
 --
 -- Name: admin_actions; Type: TABLE; Schema: public; Owner: -
@@ -212,6 +228,48 @@ UNION ALL
 
 
 --
+-- Name: activity_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.activity_log (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    actor_user_id uuid,
+    location_id uuid,
+    entity_type text,
+    entity_id uuid,
+    action text NOT NULL,
+    diff jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: aged_accounts_rows; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.aged_accounts_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    snapshot_id uuid,
+    bucket text,
+    amount numeric,
+    total numeric
+);
+
+
+--
+-- Name: aged_accounts_snapshots; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.aged_accounts_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    report_date date,
+    source_upload_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: alerts; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -291,6 +349,26 @@ CREATE TABLE public.auth_rate_limits (
 
 
 --
+-- Name: billing_tickets; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.billing_tickets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    contact_id uuid,
+    child_external_id text,
+    status text DEFAULT 'open'::text NOT NULL,
+    priority text DEFAULT 'med'::text NOT NULL,
+    assigned_to_user_id uuid,
+    reason text,
+    internal_notes text,
+    created_by_user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: class_instances; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -358,7 +436,11 @@ CREATE TABLE public.client_intakes (
     notes text,
     hubspot_contact_id text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    swimmer_name text,
+    guardian_name text,
+    requested_start_date date,
+    source_detail text
 );
 
 
@@ -375,6 +457,45 @@ CREATE TABLE public.clients (
     phone text,
     source_system text,
     source_external_id text,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: contact_group_members; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contact_group_members (
+    group_id uuid NOT NULL,
+    contact_id uuid NOT NULL,
+    added_by_user_id uuid,
+    added_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: contact_groups; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contact_groups (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    canonical_contact_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: contacts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.contacts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    source text,
+    full_name text,
+    email text,
+    phone text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -408,6 +529,35 @@ CREATE TABLE public.day_closures (
     closed_at timestamp with time zone DEFAULT now() NOT NULL,
     reopened_by uuid,
     reopened_at timestamp with time zone
+);
+
+
+--
+-- Name: drop_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.drop_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    drop_date date,
+    swimmer_name text,
+    reason text,
+    source_upload_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: enrollment_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.enrollment_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    event_date date,
+    swimmer_name text,
+    source_upload_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -461,6 +611,45 @@ CREATE TABLE public.gmail_oauth_tokens (
 
 
 --
+-- Name: homebase_shifts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.homebase_shifts (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid NOT NULL,
+    homebase_shift_id text NOT NULL,
+    homebase_staff_id text,
+    staff_id uuid,
+    start_at timestamp with time zone,
+    end_at timestamp with time zone,
+    role text,
+    status text,
+    is_open boolean DEFAULT false NOT NULL,
+    raw jsonb,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: homebase_staff; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.homebase_staff (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid NOT NULL,
+    homebase_id text NOT NULL,
+    first_name text,
+    last_name text,
+    full_name text,
+    email text,
+    phone text,
+    role text,
+    is_active boolean DEFAULT true NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: instructor_observation_swimmers; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -490,6 +679,37 @@ CREATE TABLE public.instructor_retention_snapshots (
     retained_start integer,
     retained_end integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: integration_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.integration_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    provider text NOT NULL,
+    location_id uuid,
+    event_type text NOT NULL,
+    status text NOT NULL,
+    message text,
+    payload jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: integration_status; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.integration_status (
+    provider text NOT NULL,
+    location_id uuid NOT NULL,
+    last_synced_at timestamp with time zone,
+    last_success_at timestamp with time zone,
+    last_error text,
+    meta jsonb,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -528,6 +748,17 @@ CREATE TABLE public.locations (
 
 
 --
+-- Name: notification_reads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.notification_reads (
+    notification_id uuid NOT NULL,
+    staff_id uuid NOT NULL,
+    read_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: notifications; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -539,7 +770,59 @@ CREATE TABLE public.notifications (
     payload_json jsonb,
     created_by uuid,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    read_at timestamp with time zone
+    read_at timestamp with time zone,
+    channel text DEFAULT 'manager'::text,
+    title text,
+    body text,
+    entity_type text,
+    entity_id uuid,
+    created_by_staff_id uuid
+);
+
+
+--
+-- Name: reconciliations; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.reconciliations (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    entity_type text NOT NULL,
+    entity_key text NOT NULL,
+    issue_type text NOT NULL,
+    options jsonb,
+    selected_option jsonb,
+    resolved_by_user_id uuid,
+    resolved_at timestamp with time zone,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: retention_rows; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.retention_rows (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    snapshot_id uuid,
+    instructor_name text,
+    booked integer,
+    retained integer,
+    percent_this_cycle numeric,
+    percent_change numeric
+);
+
+
+--
+-- Name: retention_snapshots; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.retention_snapshots (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    location_id uuid,
+    report_date date,
+    source_upload_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -663,6 +946,25 @@ CREATE TABLE public.shared_pins (
 
 
 --
+-- Name: ssp_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.ssp_events (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    roster_entry_id uuid,
+    location_id uuid,
+    swimmer_name text,
+    swimmer_external_id text,
+    status text NOT NULL,
+    note text,
+    created_by_user_id uuid,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    revoked_by_user_id uuid,
+    revoked_at timestamp with time zone
+);
+
+
+--
 -- Name: staff; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -711,6 +1013,20 @@ CREATE TABLE public.staff_instructor_aliases (
 
 
 --
+-- Name: staff_location_access; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.staff_location_access (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    staff_id uuid NOT NULL,
+    location_id uuid NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: staff_locations; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -738,6 +1054,24 @@ CREATE TABLE public.totp_used_tokens (
     user_id uuid NOT NULL,
     token_hash text NOT NULL,
     used_at timestamp with time zone DEFAULT now()
+);
+
+
+--
+-- Name: uploads; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.uploads (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    type text NOT NULL,
+    location_id uuid,
+    uploaded_by_user_id uuid,
+    uploaded_at timestamp with time zone DEFAULT now() NOT NULL,
+    detected_start_date date,
+    detected_end_date date,
+    parsed_count integer,
+    inserted_count integer,
+    warnings jsonb
 );
 
 
@@ -841,11 +1175,43 @@ CREATE TABLE public.users (
 
 
 --
+-- Name: acne_leads acne_leads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.acne_leads
+    ADD CONSTRAINT acne_leads_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: activity_log activity_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: admin_actions admin_actions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.admin_actions
     ADD CONSTRAINT admin_actions_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: aged_accounts_rows aged_accounts_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.aged_accounts_rows
+    ADD CONSTRAINT aged_accounts_rows_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: aged_accounts_snapshots aged_accounts_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.aged_accounts_snapshots
+    ADD CONSTRAINT aged_accounts_snapshots_pkey PRIMARY KEY (id);
 
 
 --
@@ -897,6 +1263,14 @@ ALTER TABLE ONLY public.auth_rate_limits
 
 
 --
+-- Name: billing_tickets billing_tickets_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.billing_tickets
+    ADD CONSTRAINT billing_tickets_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: class_instances class_instances_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -937,6 +1311,30 @@ ALTER TABLE ONLY public.clients
 
 
 --
+-- Name: contact_group_members contact_group_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_group_members
+    ADD CONSTRAINT contact_group_members_pkey PRIMARY KEY (group_id, contact_id);
+
+
+--
+-- Name: contact_groups contact_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_groups
+    ADD CONSTRAINT contact_groups_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: contacts contacts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contacts
+    ADD CONSTRAINT contacts_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: coverage_overrides coverage_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -958,6 +1356,22 @@ ALTER TABLE ONLY public.day_closures
 
 ALTER TABLE ONLY public.day_closures
     ADD CONSTRAINT day_closures_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: drop_events drop_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.drop_events
+    ADD CONSTRAINT drop_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: enrollment_events enrollment_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enrollment_events
+    ADD CONSTRAINT enrollment_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -993,6 +1407,38 @@ ALTER TABLE ONLY public.gmail_oauth_tokens
 
 
 --
+-- Name: homebase_shifts homebase_shifts_location_id_homebase_shift_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_shifts
+    ADD CONSTRAINT homebase_shifts_location_id_homebase_shift_id_key UNIQUE (location_id, homebase_shift_id);
+
+
+--
+-- Name: homebase_shifts homebase_shifts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_shifts
+    ADD CONSTRAINT homebase_shifts_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: homebase_staff homebase_staff_location_id_homebase_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_staff
+    ADD CONSTRAINT homebase_staff_location_id_homebase_id_key UNIQUE (location_id, homebase_id);
+
+
+--
+-- Name: homebase_staff homebase_staff_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_staff
+    ADD CONSTRAINT homebase_staff_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: instructor_observation_swimmers instructor_observation_swimmers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1022,6 +1468,22 @@ ALTER TABLE ONLY public.instructor_retention_snapshots
 
 ALTER TABLE ONLY public.instructor_retention_snapshots
     ADD CONSTRAINT instructor_retention_snapshots_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: integration_events integration_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.integration_events
+    ADD CONSTRAINT integration_events_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: integration_status integration_status_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.integration_status
+    ADD CONSTRAINT integration_status_pkey PRIMARY KEY (provider, location_id);
 
 
 --
@@ -1057,11 +1519,27 @@ ALTER TABLE ONLY public.locations
 
 
 --
+-- Name: notification_reads notification_reads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_reads
+    ADD CONSTRAINT notification_reads_pkey PRIMARY KEY (notification_id, staff_id);
+
+
+--
 -- Name: notifications notifications_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: reconciliations reconciliations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reconciliations
+    ADD CONSTRAINT reconciliations_pkey PRIMARY KEY (id);
 
 
 --
@@ -1078,6 +1556,22 @@ ALTER TABLE ONLY public.report_uploads
 
 ALTER TABLE ONLY public.report_uploads
     ADD CONSTRAINT report_uploads_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: retention_rows retention_rows_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retention_rows
+    ADD CONSTRAINT retention_rows_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: retention_snapshots retention_snapshots_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retention_snapshots
+    ADD CONSTRAINT retention_snapshots_pkey PRIMARY KEY (id);
 
 
 --
@@ -1161,6 +1655,14 @@ ALTER TABLE ONLY public.shared_pins
 
 
 --
+-- Name: ssp_events ssp_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ssp_events
+    ADD CONSTRAINT ssp_events_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: staff_directory staff_directory_location_id_full_name_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1201,6 +1703,22 @@ ALTER TABLE ONLY public.staff_instructor_aliases
 
 
 --
+-- Name: staff_location_access staff_location_access_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_location_access
+    ADD CONSTRAINT staff_location_access_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: staff_location_access staff_location_access_staff_id_location_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_location_access
+    ADD CONSTRAINT staff_location_access_staff_id_location_id_key UNIQUE (staff_id, location_id);
+
+
+--
 -- Name: staff_locations staff_locations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1230,6 +1748,14 @@ ALTER TABLE ONLY public.staff
 
 ALTER TABLE ONLY public.totp_used_tokens
     ADD CONSTRAINT totp_used_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: uploads uploads_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.uploads
+    ADD CONSTRAINT uploads_pkey PRIMARY KEY (id);
 
 
 --
@@ -1327,6 +1853,20 @@ CREATE INDEX class_instances_upload_id_idx ON public.class_instances USING btree
 
 
 --
+-- Name: idx_acne_leads_location_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_acne_leads_location_date ON public.acne_leads USING btree (location_id, lead_date DESC);
+
+
+--
+-- Name: idx_activity_log_location_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_activity_log_location_created ON public.activity_log USING btree (location_id, created_at DESC);
+
+
+--
 -- Name: idx_admin_actions_actor; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1338,6 +1878,13 @@ CREATE INDEX idx_admin_actions_actor ON public.admin_actions USING btree (actor_
 --
 
 CREATE INDEX idx_admin_actions_target ON public.admin_actions USING btree (target_user_id);
+
+
+--
+-- Name: idx_aged_accounts_rows_snapshot; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_aged_accounts_rows_snapshot ON public.aged_accounts_rows USING btree (snapshot_id);
 
 
 --
@@ -1404,6 +1951,27 @@ CREATE INDEX idx_backup_codes_user ON public.user_backup_codes USING btree (user
 
 
 --
+-- Name: idx_billing_tickets_location_status; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_billing_tickets_location_status ON public.billing_tickets USING btree (location_id, status);
+
+
+--
+-- Name: idx_contacts_email; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contacts_email ON public.contacts USING btree (lower(email));
+
+
+--
+-- Name: idx_contacts_phone; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_contacts_phone ON public.contacts USING btree (phone);
+
+
+--
 -- Name: idx_coverage_user_dates; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1411,10 +1979,45 @@ CREATE INDEX idx_coverage_user_dates ON public.coverage_overrides USING btree (u
 
 
 --
+-- Name: idx_drop_events_location_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_drop_events_location_date ON public.drop_events USING btree (location_id, drop_date DESC);
+
+
+--
+-- Name: idx_enrollment_events_location_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_enrollment_events_location_date ON public.enrollment_events USING btree (location_id, event_date DESC);
+
+
+--
 -- Name: idx_entity_notes_entity; Type: INDEX; Schema: public; Owner: -
 --
 
 CREATE INDEX idx_entity_notes_entity ON public.entity_notes USING btree (entity_type, entity_id);
+
+
+--
+-- Name: idx_homebase_shifts_time; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_homebase_shifts_time ON public.homebase_shifts USING btree (location_id, start_at, end_at);
+
+
+--
+-- Name: idx_integration_events_provider_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_integration_events_provider_created ON public.integration_events USING btree (provider, created_at DESC);
+
+
+--
+-- Name: idx_notifications_channel_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_notifications_channel_created ON public.notifications USING btree (channel, created_at DESC);
 
 
 --
@@ -1429,6 +2032,20 @@ CREATE INDEX idx_notifications_location_created ON public.notifications USING bt
 --
 
 CREATE INDEX idx_notifications_type ON public.notifications USING btree (type);
+
+
+--
+-- Name: idx_reconciliations_entity; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_reconciliations_entity ON public.reconciliations USING btree (entity_type, entity_key);
+
+
+--
+-- Name: idx_retention_rows_snapshot; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_retention_rows_snapshot ON public.retention_rows USING btree (snapshot_id);
 
 
 --
@@ -1460,6 +2077,34 @@ CREATE INDEX idx_sessions_user ON public.sessions USING btree (user_id);
 
 
 --
+-- Name: idx_ssp_events_location_created; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ssp_events_location_created ON public.ssp_events USING btree (location_id, created_at DESC);
+
+
+--
+-- Name: idx_ssp_events_swimmer; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_ssp_events_swimmer ON public.ssp_events USING btree (swimmer_external_id);
+
+
+--
+-- Name: idx_staff_location_access_location; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_staff_location_access_location ON public.staff_location_access USING btree (location_id);
+
+
+--
+-- Name: idx_staff_location_access_staff; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_staff_location_access_staff ON public.staff_location_access USING btree (staff_id);
+
+
+--
 -- Name: idx_totp_used_at; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -1471,6 +2116,20 @@ CREATE INDEX idx_totp_used_at ON public.totp_used_tokens USING btree (used_at);
 --
 
 CREATE INDEX idx_totp_used_user ON public.totp_used_tokens USING btree (user_id);
+
+
+--
+-- Name: idx_uploads_location_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_uploads_location_date ON public.uploads USING btree (location_id, uploaded_at DESC);
+
+
+--
+-- Name: idx_uploads_type; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_uploads_type ON public.uploads USING btree (type);
 
 
 --
@@ -1523,6 +2182,13 @@ CREATE INDEX roster_uploads_uploaded_at_idx ON public.roster_uploads USING btree
 
 
 --
+-- Name: billing_tickets trg_billing_tickets_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_billing_tickets_updated_at BEFORE UPDATE ON public.billing_tickets FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: client_intakes trg_client_intakes_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1534,6 +2200,13 @@ CREATE TRIGGER trg_client_intakes_updated_at BEFORE UPDATE ON public.client_inta
 --
 
 CREATE TRIGGER trg_clients_updated_at BEFORE UPDATE ON public.clients FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: contacts trg_contacts_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_contacts_updated_at BEFORE UPDATE ON public.contacts FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -1565,6 +2238,13 @@ CREATE TRIGGER trg_staff_directory_updated_at BEFORE UPDATE ON public.staff_dire
 
 
 --
+-- Name: staff_location_access trg_staff_location_access_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_staff_location_access_updated_at BEFORE UPDATE ON public.staff_location_access FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
 -- Name: staff_locations trg_staff_locations_updated_at; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -1583,6 +2263,38 @@ CREATE TRIGGER trg_staff_updated_at BEFORE UPDATE ON public.staff FOR EACH ROW E
 --
 
 CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: acne_leads acne_leads_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.acne_leads
+    ADD CONSTRAINT acne_leads_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: acne_leads acne_leads_source_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.acne_leads
+    ADD CONSTRAINT acne_leads_source_upload_id_fkey FOREIGN KEY (source_upload_id) REFERENCES public.uploads(id) ON DELETE SET NULL;
+
+
+--
+-- Name: activity_log activity_log_actor_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_actor_user_id_fkey FOREIGN KEY (actor_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: activity_log activity_log_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.activity_log
+    ADD CONSTRAINT activity_log_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
 
 
 --
@@ -1607,6 +2319,30 @@ ALTER TABLE ONLY public.admin_actions
 
 ALTER TABLE ONLY public.admin_actions
     ADD CONSTRAINT admin_actions_target_user_id_fkey FOREIGN KEY (target_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: aged_accounts_rows aged_accounts_rows_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.aged_accounts_rows
+    ADD CONSTRAINT aged_accounts_rows_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.aged_accounts_snapshots(id) ON DELETE CASCADE;
+
+
+--
+-- Name: aged_accounts_snapshots aged_accounts_snapshots_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.aged_accounts_snapshots
+    ADD CONSTRAINT aged_accounts_snapshots_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: aged_accounts_snapshots aged_accounts_snapshots_source_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.aged_accounts_snapshots
+    ADD CONSTRAINT aged_accounts_snapshots_source_upload_id_fkey FOREIGN KEY (source_upload_id) REFERENCES public.uploads(id) ON DELETE SET NULL;
 
 
 --
@@ -1655,6 +2391,38 @@ ALTER TABLE ONLY public.audit_events
 
 ALTER TABLE ONLY public.auth_audit_log
     ADD CONSTRAINT auth_audit_log_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: billing_tickets billing_tickets_assigned_to_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.billing_tickets
+    ADD CONSTRAINT billing_tickets_assigned_to_user_id_fkey FOREIGN KEY (assigned_to_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: billing_tickets billing_tickets_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.billing_tickets
+    ADD CONSTRAINT billing_tickets_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contacts(id) ON DELETE SET NULL;
+
+
+--
+-- Name: billing_tickets billing_tickets_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.billing_tickets
+    ADD CONSTRAINT billing_tickets_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: billing_tickets billing_tickets_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.billing_tickets
+    ADD CONSTRAINT billing_tickets_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
 
 
 --
@@ -1714,6 +2482,46 @@ ALTER TABLE ONLY public.clients
 
 
 --
+-- Name: contact_group_members contact_group_members_added_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_group_members
+    ADD CONSTRAINT contact_group_members_added_by_user_id_fkey FOREIGN KEY (added_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contact_group_members contact_group_members_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_group_members
+    ADD CONSTRAINT contact_group_members_contact_id_fkey FOREIGN KEY (contact_id) REFERENCES public.contacts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contact_group_members contact_group_members_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_group_members
+    ADD CONSTRAINT contact_group_members_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.contact_groups(id) ON DELETE CASCADE;
+
+
+--
+-- Name: contact_groups contact_groups_canonical_contact_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contact_groups
+    ADD CONSTRAINT contact_groups_canonical_contact_id_fkey FOREIGN KEY (canonical_contact_id) REFERENCES public.contacts(id) ON DELETE SET NULL;
+
+
+--
+-- Name: contacts contacts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.contacts
+    ADD CONSTRAINT contacts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
 -- Name: coverage_overrides coverage_overrides_granted_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1762,6 +2570,38 @@ ALTER TABLE ONLY public.day_closures
 
 
 --
+-- Name: drop_events drop_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.drop_events
+    ADD CONSTRAINT drop_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: drop_events drop_events_source_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.drop_events
+    ADD CONSTRAINT drop_events_source_upload_id_fkey FOREIGN KEY (source_upload_id) REFERENCES public.uploads(id) ON DELETE SET NULL;
+
+
+--
+-- Name: enrollment_events enrollment_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enrollment_events
+    ADD CONSTRAINT enrollment_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: enrollment_events enrollment_events_source_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.enrollment_events
+    ADD CONSTRAINT enrollment_events_source_upload_id_fkey FOREIGN KEY (source_upload_id) REFERENCES public.uploads(id) ON DELETE SET NULL;
+
+
+--
 -- Name: entity_notes entity_notes_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1775,6 +2615,30 @@ ALTER TABLE ONLY public.entity_notes
 
 ALTER TABLE ONLY public.entity_notes
     ADD CONSTRAINT entity_notes_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: homebase_shifts homebase_shifts_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_shifts
+    ADD CONSTRAINT homebase_shifts_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: homebase_shifts homebase_shifts_staff_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_shifts
+    ADD CONSTRAINT homebase_shifts_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.staff(id) ON DELETE SET NULL;
+
+
+--
+-- Name: homebase_staff homebase_staff_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.homebase_staff
+    ADD CONSTRAINT homebase_staff_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
 
 
 --
@@ -1826,6 +2690,22 @@ ALTER TABLE ONLY public.location_features
 
 
 --
+-- Name: notification_reads notification_reads_notification_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_reads
+    ADD CONSTRAINT notification_reads_notification_id_fkey FOREIGN KEY (notification_id) REFERENCES public.notifications(id) ON DELETE CASCADE;
+
+
+--
+-- Name: notification_reads notification_reads_staff_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notification_reads
+    ADD CONSTRAINT notification_reads_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.staff(id) ON DELETE CASCADE;
+
+
+--
 -- Name: notifications notifications_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1834,11 +2714,35 @@ ALTER TABLE ONLY public.notifications
 
 
 --
+-- Name: notifications notifications_created_by_staff_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.notifications
+    ADD CONSTRAINT notifications_created_by_staff_id_fkey FOREIGN KEY (created_by_staff_id) REFERENCES public.staff(id) ON DELETE SET NULL;
+
+
+--
 -- Name: notifications notifications_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
 ALTER TABLE ONLY public.notifications
     ADD CONSTRAINT notifications_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: reconciliations reconciliations_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reconciliations
+    ADD CONSTRAINT reconciliations_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: reconciliations reconciliations_resolved_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.reconciliations
+    ADD CONSTRAINT reconciliations_resolved_by_user_id_fkey FOREIGN KEY (resolved_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --
@@ -1855,6 +2759,30 @@ ALTER TABLE ONLY public.report_uploads
 
 ALTER TABLE ONLY public.report_uploads
     ADD CONSTRAINT report_uploads_uploaded_by_user_id_fkey FOREIGN KEY (uploaded_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: retention_rows retention_rows_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retention_rows
+    ADD CONSTRAINT retention_rows_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES public.retention_snapshots(id) ON DELETE CASCADE;
+
+
+--
+-- Name: retention_snapshots retention_snapshots_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retention_snapshots
+    ADD CONSTRAINT retention_snapshots_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: retention_snapshots retention_snapshots_source_upload_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.retention_snapshots
+    ADD CONSTRAINT retention_snapshots_source_upload_id_fkey FOREIGN KEY (source_upload_id) REFERENCES public.uploads(id) ON DELETE SET NULL;
 
 
 --
@@ -1946,6 +2874,38 @@ ALTER TABLE ONLY public.shared_pins
 
 
 --
+-- Name: ssp_events ssp_events_created_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ssp_events
+    ADD CONSTRAINT ssp_events_created_by_user_id_fkey FOREIGN KEY (created_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ssp_events ssp_events_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ssp_events
+    ADD CONSTRAINT ssp_events_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ssp_events ssp_events_revoked_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ssp_events
+    ADD CONSTRAINT ssp_events_revoked_by_user_id_fkey FOREIGN KEY (revoked_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: ssp_events ssp_events_roster_entry_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.ssp_events
+    ADD CONSTRAINT ssp_events_roster_entry_id_fkey FOREIGN KEY (roster_entry_id) REFERENCES public.roster_entries(id) ON DELETE SET NULL;
+
+
+--
 -- Name: staff_directory staff_directory_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1970,6 +2930,22 @@ ALTER TABLE ONLY public.staff_instructor_aliases
 
 
 --
+-- Name: staff_location_access staff_location_access_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_location_access
+    ADD CONSTRAINT staff_location_access_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE CASCADE;
+
+
+--
+-- Name: staff_location_access staff_location_access_staff_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.staff_location_access
+    ADD CONSTRAINT staff_location_access_staff_id_fkey FOREIGN KEY (staff_id) REFERENCES public.staff(id) ON DELETE CASCADE;
+
+
+--
 -- Name: staff_locations staff_locations_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1991,6 +2967,22 @@ ALTER TABLE ONLY public.staff_locations
 
 ALTER TABLE ONLY public.totp_used_tokens
     ADD CONSTRAINT totp_used_tokens_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: uploads uploads_location_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.uploads
+    ADD CONSTRAINT uploads_location_id_fkey FOREIGN KEY (location_id) REFERENCES public.locations(id) ON DELETE SET NULL;
+
+
+--
+-- Name: uploads uploads_uploaded_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.uploads
+    ADD CONSTRAINT uploads_uploaded_by_user_id_fkey FOREIGN KEY (uploaded_by_user_id) REFERENCES public.users(id) ON DELETE SET NULL;
 
 
 --
@@ -2077,7 +3069,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 3fJ2yrgnGk8G9matvlZrr2UBpIAdcY8zJkrqn6lhJbLrRFpm3MeHu87mx5VrUTO
+\unrestrict QkhTM8xybWcR88lpoTp6POfsiHrmkOyFO97Y1LysVZTEzLwwLjZJ49kOI4dh5gz
 
 
 --
@@ -2113,4 +3105,7 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260202102000'),
     ('20260202103000'),
     ('20260202103100'),
-    ('20260202120000');
+    ('20260202120000'),
+    ('20260202140000'),
+    ('20260203120000'),
+    ('20260203121000');

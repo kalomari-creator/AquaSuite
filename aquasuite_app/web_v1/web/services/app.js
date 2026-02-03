@@ -10,12 +10,12 @@ const state = {
   filteredEntries: [],
   selectedBlock: null,
   manualOverride: false,
+  showAllTimes: false,
   instructorFilter: 'all',
   search: '',
   sortBy: 'instructor',
   staff: [],
   version: null,
-  reportPreflight: null,
   observationRoster: [],
   observationSwimmers: [],
   rosterNoteEntryId: null,
@@ -24,26 +24,51 @@ const state = {
   noteEntityType: null,
   noteEntityId: null,
   classInstances: [],
-  activityEvents: []
+  activityEvents: [],
+  subtabs: {
+    uploads: 'daily-roster',
+    reports: 'enrollment-tracker',
+    staff: 'staff-list',
+    intakes: 'google-intakes',
+    locations: 'location-list',
+    notifications: 'general'
+  },
+  contacts: [],
+  contactDuplicates: [],
+  reports: {
+    attendance: null,
+    instructorLoad: null,
+    rosterHealth: null,
+    ssp: null,
+    enrollment: null,
+    retention: null,
+    agedAccounts: null,
+    dropList: null
+  }
 }
 
 const el = (id) => document.getElementById(id)
 const API_BASE = '/api'
-const PRIVATE_IP_REGEX = /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/
+const PRIVATE_HOST_REGEX = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/
 function assertSafeEnvironment() {
-  const host = window.location.hostname || ''
-  if (PRIVATE_IP_REGEX.test(host)) {
-    throw new Error('internal_ip_not_allowed')
-  }
   if (API_BASE.startsWith('http')) {
     const baseHost = new URL(API_BASE).hostname || ''
-    if (PRIVATE_IP_REGEX.test(baseHost)) {
+    if (PRIVATE_HOST_REGEX.test(baseHost)) {
       throw new Error('internal_api_base_not_allowed')
     }
   }
 }
 
 let envOk = true
+let attendanceChart = null
+let instructorChart = null
+let sspChart = null
+let enrollmentChart = null
+let retentionChart = null
+let agedAccountsChart = null
+let dropListChart = null
+const reportPreflightCache = {}
+let pendingReportUpload = null
 
 const loginPanel = el('loginPanel')
 const appPanel = el('appPanel')
@@ -54,11 +79,14 @@ const dateSelect = el('dateSelect')
 const timeBlocks = el('timeBlocks')
 const timeActive = el('timeActive')
 const timeBlockToggle = el('timeBlockToggle')
+const timeBlockSelect = el('timeBlockSelect')
 const timeBlockStatus = el('timeBlockStatus')
 const selectedBlock = el('selectedBlock')
+const homebaseShiftStatus = el('homebaseShiftStatus')
 const rosterTable = el('rosterTable')
 const rosterMeta = el('rosterMeta')
 const rosterEmpty = el('rosterEmpty')
+const rosterUploadCard = el('rosterUploadCard')
 const rosterSearch = el('rosterSearch')
 const addSwimmerBtn = el('addSwimmerBtn')
 const searchClear = el('searchClear')
@@ -66,25 +94,61 @@ const sortBy = el('sortBy')
 const instructorFilter = el('instructorFilter')
 const bulkMarkPresent = el('bulkMarkPresent')
 const bulkClearAttendance = el('bulkClearAttendance')
-const uploadForm = el('uploadForm')
 const rosterFile = el('rosterFile')
 const uploadRosterFile = el('uploadRosterFile')
+const enrollmentRosterFile = el('enrollmentRosterFile')
 const rosterUploadStatus = el('rosterUploadStatus')
 const uploadStatusUploads = el('uploadStatusUploads')
+const uploadStatusEnrollment = el('uploadStatusEnrollment')
 const uploadConfirmBtn = el('uploadConfirmBtn')
 const uploadConfirmModal = el('uploadConfirmModal')
 const uploadConfirmSummary = el('uploadConfirmSummary')
 const uploadConfirmRun = el('uploadConfirmRun')
 const uploadConfirmClose = el('uploadConfirmClose')
-const uploadList = el('uploadList')
-const reportList = el('reportList')
+const uploadMergeMode = el('uploadMergeMode')
+const uploadHistoryList = el('uploadHistoryList')
+const reportConfirmModal = el('reportConfirmModal')
+const reportConfirmSummary = el('reportConfirmSummary')
+const reportConfirmCheckbox = el('reportConfirmCheckbox')
+const reportConfirmRun = el('reportConfirmRun')
+const reportConfirmClose = el('reportConfirmClose')
+const reportConfirmStatus = el('reportConfirmStatus')
+const reportStartDate = el('reportStartDate')
+const reportEndDate = el('reportEndDate')
+const reportInstructorFilter = el('reportInstructorFilter')
+const reportProgramFilter = el('reportProgramFilter')
+const reportsRefreshBtn = el('reportsRefreshBtn')
+const reportsStatus = el('reportsStatus')
+const attendanceKpis = el('attendanceKpis')
+const attendanceChartEl = el('attendanceChart')
+const attendanceTable = el('attendanceTable')
+const attendanceExportBtn = el('attendanceExportBtn')
+const instructorChartEl = el('instructorChart')
+const instructorTable = el('instructorTable')
+const instructorExportBtn = el('instructorExportBtn')
+const rosterHealthKpis = el('rosterHealthKpis')
+const rosterHealthTable = el('rosterHealthTable')
+const rosterHealthExportBtn = el('rosterHealthExportBtn')
+const sspChartEl = el('sspChart')
+const sspTable = el('sspTable')
+const sspExportBtn = el('sspExportBtn')
+const enrollmentChartEl = el('enrollmentChart')
+const enrollmentTable = el('enrollmentTable')
+const enrollmentExportBtn = el('enrollmentExportBtn')
+const retentionChartEl = el('retentionChart')
 const retentionTable = el('retentionTable')
-const reportFile = el('reportFile')
-const reportPreflightBtn = el('reportPreflightBtn')
-const reportPreflight = el('reportPreflight')
-const reportConfirm = el('reportConfirm')
-const reportUploadBtn = el('reportUploadBtn')
-const reportStatus = el('reportStatus')
+const retentionExportBtn = el('retentionExportBtn')
+const agedAccountsChartEl = el('agedAccountsChart')
+const agedAccountsTable = el('agedAccountsTable')
+const agedAccountsExportBtn = el('agedAccountsExportBtn')
+const dropListChartEl = el('dropListChart')
+const dropListTable = el('dropListTable')
+const dropListExportBtn = el('dropListExportBtn')
+const contactsSearch = el('contactsSearch')
+const contactsTable = el('contactsTable')
+const contactsDuplicates = el('contactsDuplicates')
+const contactsExportBtn = el('contactsExportBtn')
+const hubspotSyncBtn = el('hubspotSyncBtn')
 const rosterModeSelect = el('rosterModeSelect')
 const todayBtn = el('todayBtn')
 const obsFormTab = el('obsFormTab')
@@ -110,6 +174,8 @@ const rosterNoteSave = el('rosterNoteSave')
 const rosterNoteClear = el('rosterNoteClear')
 const rosterNoteText = el('rosterNoteText')
 const sspPassBtn = el('sspPassBtn')
+const sspRevokeBtn = el('sspRevokeBtn')
+const billingFlagBtn = el('billingFlagBtn')
 const sspStatus = el('sspStatus')
 const addSwimmerModal = el('addSwimmerModal')
 const addSwimmerClose = el('addSwimmerClose')
@@ -144,6 +210,12 @@ const intakeBadge = el('intakeBadge')
 const gmailConnectBtn = el('gmailConnectBtn')
 const gmailStatus = el('gmailStatus')
 const locationAdminList = el('locationAdminList')
+const locationAddName = el('locationAddName')
+const locationAddCode = el('locationAddCode')
+const locationAddState = el('locationAddState')
+const locationAddTimezone = el('locationAddTimezone')
+const locationAddBtn = el('locationAddBtn')
+const locationAddStatus = el('locationAddStatus')
 const announcerTab = el('announcerTab')
 const revBtn = el('revBtn')
 const revModal = el('revModal')
@@ -171,6 +243,10 @@ const changePinStatus = el('changePinStatus')
 
 const activityTab = el('activityTab')
 const activityList = el('activityList')
+const billingQueueCard = el('billingQueueCard')
+const billingQueueList = el('billingQueueList')
+const billingStatusFilter = el('billingStatusFilter')
+const billingRefreshBtn = el('billingRefreshBtn')
 const activityFilter = el('activityFilter')
 const activityUserInput = el('activityUserInput')
 const activityUserList = el('activityUserList')
@@ -191,9 +267,10 @@ const eodSummary = el('eodSummary')
 const eodAlerts = el('eodAlerts')
 const notificationList = el('notificationList')
 const notificationsRefresh = el('notificationsRefresh')
+const managerNotificationList = el('managerNotificationList')
+const managerNotificationsRefresh = el('managerNotificationsRefresh')
 const printRosterBtn = el('printRosterBtn')
 const classNoteBtn = el('classNoteBtn')
-const printRetentionBtn = el('printRetentionBtn')
 const printIntakeBtn = el('printIntakeBtn')
 const tourModal = el('tourModal')
 const tourTitle = el('tourTitle')
@@ -225,6 +302,12 @@ const qaResetBtn = el('qaResetBtn')
 const obsInstructorMeta = el('obsInstructorMeta')
 const obsInstructorOverride = el('obsInstructorOverride')
 const integrationStatus = el('integrationStatus')
+const integrationStatusCard = el('integrationStatusCard')
+const integrationStatusList = el('integrationStatusList')
+const homebaseSyncCard = el('homebaseSyncCard')
+const homebaseSyncBtn = el('homebaseSyncBtn')
+const homebaseSyncStatus = el('homebaseSyncStatus')
+const homebaseSyncList = el('homebaseSyncList')
 
 const locationPrefKey = 'aqua_location_id'
 const qaRolePrefKey = 'qa_role_preview'
@@ -316,7 +399,8 @@ function normalizeRoleKey(key) {
   const raw = String(key || '').trim().toLowerCase()
   if (['owner', 'exec_admin', 'admin'].includes(raw)) return 'admin'
   if (['front_desk', 'virtual_desk', 'manager'].includes(raw)) return 'manager'
-  if (['deck', 'staff', 'instructor'].includes(raw)) return 'instructor'
+  if (['deck', 'staff', 'instructor', 'aquatics_staff'].includes(raw)) return 'instructor'
+  if (['guard', 'lifeguard'].includes(raw)) return 'readonly'
   return 'readonly'
 }
 
@@ -324,6 +408,29 @@ function getEffectiveRoleKey() {
   const preview = localStorage.getItem(qaRolePrefKey)
   if (preview) return preview
   return normalizeRoleKey(state.user?.effectiveRoleKey || state.user?.roleKey || '')
+}
+
+function getEffectiveRoleLabel() {
+  const key = getEffectiveRoleKey()
+  if (key === 'admin') return 'Admin'
+  if (key === 'manager') return 'Manager'
+  if (key === 'instructor') return 'Aquatics Staff'
+  if (key === 'readonly') return 'Guard'
+  return key
+}
+
+function normalizeInstructorName(value) {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  return raw
+    .replace(/\s+\d{1,2}\/\d{1,2}\/\d{4}$/g, '')
+    .replace(/\s+\d{1,2}\/\d{1,2}\/\d{2}$/g, '')
+    .trim()
+}
+
+function formatInstructorLabel(value, fallback = 'Unassigned') {
+  const normalized = normalizeInstructorName(value)
+  return normalized || value || fallback
 }
 
 function applyQaControls() {
@@ -389,6 +496,7 @@ function scheduleLayoutUpdate() {
 
 window.addEventListener('resize', scheduleLayoutUpdate)
 window.addEventListener('orientationchange', scheduleLayoutUpdate)
+window.addEventListener('hashchange', applyRouteFromHash)
 mediaCoarse.addEventListener('change', scheduleLayoutUpdate)
 mediaNoHover.addEventListener('change', scheduleLayoutUpdate)
 
@@ -405,6 +513,8 @@ function setLoggedOut() {
   if (appPanel) appPanel.classList.add('hidden')
   closeNavDrawer()
   closeGearMenu()
+  closeUploadConfirm()
+  closeReportConfirm()
 }
 
 function setLoggedIn() {
@@ -468,12 +578,79 @@ async function loadVersion() {
 }
 
 async function loadIntegrationStatus() {
-  if (!integrationStatus) return
+  if (!integrationStatus && !integrationStatusList) return
+  let hubspot = null
+  let homebase = null
   try {
-    const data = await apiFetch('/integrations/hubspot/status')
-    integrationStatus.textContent = `HubSpot: ${data.configured ? 'Configured' : 'Not configured'}`
+    hubspot = await apiFetch('/integrations/hubspot/status')
   } catch {
-    integrationStatus.textContent = 'HubSpot: status unavailable'
+    hubspot = { configured: false, enabled: false, error: 'status_unavailable' }
+  }
+  try {
+    homebase = await apiFetch('/integrations/homebase/status')
+  } catch {
+    homebase = { configured: false, enabled: false, error: 'status_unavailable' }
+  }
+
+  if (integrationStatus) {
+    const hub = hubspot?.configured ? 'Configured' : 'Not configured'
+    const hb = homebase?.configured ? 'Configured' : 'Not configured'
+    integrationStatus.textContent = `HubSpot: ${hub} • Homebase: ${hb}`
+  }
+
+  if (integrationStatusList) {
+    integrationStatusList.innerHTML = ''
+    const rows = [
+      { title: 'HubSpot', data: hubspot },
+      { title: 'Homebase', data: homebase }
+    ]
+    rows.forEach((row) => {
+      const item = document.createElement('div')
+      item.className = 'list-item'
+      const status = row.data?.configured ? 'Configured' : 'Not configured'
+      const lastSync = row.data?.lastSync ? new Date(row.data.lastSync).toLocaleString() : '—'
+      const error = row.data?.lastError || ''
+      item.innerHTML = `<strong>${row.title}</strong>
+        <div class="muted tiny">Status: ${status}${row.data?.enabled === false ? ' (disabled)' : ''}</div>
+        <div class="muted tiny">Last sync: ${lastSync}</div>
+        <div class="muted tiny">${error ? 'Last error: ' + error : ''}</div>`
+      integrationStatusList.appendChild(item)
+    })
+  }
+}
+
+async function loadHomebaseSyncStatus() {
+  if (!homebaseSyncList) return
+  homebaseSyncList.innerHTML = '<div class="hint">Loading Homebase status…</div>'
+  try {
+    const data = await apiFetch('/integrations/homebase/status')
+    homebaseSyncList.innerHTML = ''
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>Homebase</strong>
+      <div class="muted tiny">Last sync: ${data.lastSync ? new Date(data.lastSync).toLocaleString() : '—'}</div>
+      <div class="muted tiny">Last error: ${data.lastError || 'None'}</div>`
+    homebaseSyncList.appendChild(item)
+  } catch (err) {
+    homebaseSyncList.innerHTML = `<div class="hint">${err?.error || 'Failed to load Homebase status.'}</div>`
+  }
+}
+
+async function loadHomebaseShiftStatus() {
+  if (!homebaseShiftStatus) return
+  if (!state.locationId || state.locationId === 'all') {
+    homebaseShiftStatus.textContent = 'On shift: —'
+    return
+  }
+  try {
+    const data = await apiFetch(`/integrations/homebase/on-shift?locationId=${state.locationId}`)
+    if (data.enabled === false) {
+      homebaseShiftStatus.textContent = 'On shift: Homebase disabled'
+      return
+    }
+    homebaseShiftStatus.textContent = `On shift: ${data.count || 0}`
+  } catch {
+    homebaseShiftStatus.textContent = 'On shift: unavailable'
   }
 }
 
@@ -599,7 +776,7 @@ function formatTime(time) {
   return `${h12}:${mm} ${suffix}`
 }
 
-function setView(view) {
+function setView(view, options = {}) {
   state.view = view
   const views = ["roster","uploads","reports","observations","staff","intakes","locations","activity","notifications","announcer"]
   for (const v of views) {
@@ -610,7 +787,82 @@ function setView(view) {
     btn.classList.toggle('active', btn.dataset.view === view)
   })
   closeGearMenu()
+  applySubtab(view)
+  if (!options.silent) syncRoute()
   showTour(getEffectiveRoleKey(), view)
+}
+
+function applySubtab(view) {
+  const subtab = state.subtabs[view]
+  const panel = el("view" + view[0].toUpperCase() + view.slice(1))
+  if (!panel) return
+  panel.querySelectorAll('[data-subtab]').forEach((node) => {
+    const match = node.dataset.subtab === subtab
+    node.classList.toggle('hidden', !match)
+  })
+  panel.querySelectorAll('[data-subtab-btn]').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.subtabBtn === subtab)
+  })
+}
+
+function setSubtab(view, subtab, options = {}) {
+  if (!subtab) return
+  state.subtabs[view] = subtab
+  if (state.view === view) applySubtab(view)
+  if (state.view === view) activateSubtab(view, subtab)
+  if (!options.silent) syncRoute()
+}
+
+function activateView(view) {
+  if (view === 'uploads') loadUploads()
+  if (view === 'reports') loadReports()
+  if (view === 'observations') { setObsTab('form'); loadObservationClasses(); renderObservationSwimmers() }
+  if (view === 'activity') { loadActivityFeed(); loadBillingTickets() }
+  if (view === 'staff') { loadStaff(); loadInstructorVariants() }
+  if (view === 'intakes') loadIntakes()
+  if (view === 'locations') { renderLocationAdmin(); loadIntegrationStatus() }
+  if (view === 'notifications') loadNotifications()
+}
+
+function activateSubtab(view, subtab) {
+  if (view === 'uploads') loadUploads()
+  if (view === 'reports') loadReports()
+  if (view === 'staff') loadStaff()
+  if (view === 'staff' && subtab === 'homebase-sync') loadHomebaseSyncStatus()
+  if (view === 'intakes') loadIntakes()
+  if (view === 'locations') renderLocationAdmin()
+  if (view === 'notifications') loadNotifications()
+}
+
+function parseRouteHash() {
+  const hash = (location.hash || '').replace(/^#/, '')
+  if (!hash) return null
+  const cleaned = hash.replace(/^\//, '')
+  const parts = cleaned.split('/').filter(Boolean)
+  if (!parts.length) return null
+  return { view: parts[0], subtab: parts[1] || null }
+}
+
+function syncRoute() {
+  const view = state.view || 'roster'
+  const subtab = state.subtabs[view]
+  const hash = `#/${view}${subtab ? `/${subtab}` : ''}`
+  if (location.hash !== hash) {
+    location.hash = hash
+  }
+}
+
+function applyRouteFromHash() {
+  const route = parseRouteHash()
+  if (!route) return
+  const view = route.view
+  if (view && view !== state.view) setView(view, { silent: true })
+  if (route.subtab) {
+    setSubtab(view, route.subtab, { silent: true })
+  } else {
+    applySubtab(view)
+  }
+  if (view) activateView(view)
 }
 
 function openNavDrawer() {
@@ -678,6 +930,7 @@ async function loadLocations() {
   if (state.locationId) localStorage.setItem(locationPrefKey, state.locationId)
   if (rosterModeSelect) rosterModeSelect.disabled = state.locationId === 'all'
   applyLocationFeatures()
+  applyRoleUi()
   applyInternalTools()
   updateContext()
   renderSavedViews('roster')
@@ -703,6 +956,11 @@ function updateContext() {
     contextLocation.textContent = loc ? loc.name : 'Location'
   }
   if (contextDate) contextDate.textContent = state.date || ''
+}
+
+function getLocationTimeZone() {
+  const loc = state.locations.find((l) => l.id === state.locationId)
+  return loc?.timezone || loc?.time_zone || loc?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
 function applyLocationFeatures() {
@@ -746,10 +1004,30 @@ function applyLocationFeatures() {
   if (activityTabEl) activityTabEl.classList.toggle("hidden", role !== "admin")
   if (notificationsTabEl) notificationsTabEl.classList.toggle("hidden", !(role === "admin" || role === "manager" || role === "instructor"))
   if (eodCloseCard) eodCloseCard.classList.toggle("hidden", !(role === "admin" || role === "manager"))
+  if (integrationStatusCard) integrationStatusCard.classList.toggle("hidden", role !== "admin")
 
   if (rosterOnly && state.view !== "roster") setView("roster")
   if (!features.announcer_enabled && state.view === "announcer") setView("roster")
   if (!features.observations_enabled && state.view === "observations") setView("roster")
+}
+
+function applyRoleUi() {
+  const role = getEffectiveRoleKey()
+  const isManager = role === 'admin' || role === 'manager'
+  const isReadonly = role === 'readonly'
+  if (rosterUploadCard) rosterUploadCard.classList.toggle('hidden', !isManager)
+  if (bulkMarkPresent) bulkMarkPresent.disabled = isReadonly
+  if (bulkClearAttendance) bulkClearAttendance.disabled = isReadonly
+  if (addSwimmerBtn) addSwimmerBtn.disabled = isReadonly
+  if (rosterActionDock) rosterActionDock.classList.toggle('hidden', isReadonly)
+  if (billingFlagBtn) billingFlagBtn.classList.toggle('hidden', !isManager)
+  if (sspRevokeBtn) sspRevokeBtn.classList.toggle('hidden', !isManager)
+  if (billingQueueCard) billingQueueCard.classList.toggle('hidden', !isManager)
+  if (homebaseSyncCard) homebaseSyncCard.classList.toggle('hidden', role !== 'admin')
+  document.querySelectorAll('#notificationsTabs [data-subtab-btn=\"manager\"]').forEach((btn) => {
+    btn.classList.toggle('hidden', !isManager)
+  })
+  if (!isManager && state.subtabs.notifications === 'manager') setSubtab('notifications', 'general', { silent: true })
 }
 
 
@@ -767,9 +1045,9 @@ function renderEodSummary() {
   if (!eodSummary) return
   const entries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
   const total = entries.length
-  const present = entries.filter((e) => e.attendance === 'present').length
-  const absent = entries.filter((e) => e.attendance === 'absent').length
-  const unknown = entries.filter((e) => !e.attendance || e.attendance === 'unknown').length
+  const present = entries.filter((e) => e.attendance === 1).length
+  const absent = entries.filter((e) => e.attendance === 0).length
+  const unknown = entries.filter((e) => e.attendance !== 0 && e.attendance !== 1).length
   const classes = new Set(entries.map((e) => e.class_name)).size
   eodSummary.textContent = `Classes ${classes} • Swimmers ${total} • Present ${present} • Absent ${absent} • Unknown ${unknown}`
 }
@@ -777,7 +1055,7 @@ function renderEodSummary() {
 async function checkAutoAdvance() {
   if (state.view !== 'roster') return
   if (!state.selectedBlock || !state.date) return
-  const tz = 'America/New_York'
+  const tz = getLocationTimeZone()
   const classes = Array.isArray(state.classInstances) ? state.classInstances : []
   const current = classes.find((c) => c.start_time == state.selectedBlock)
   if (!current || !current.end_time) return
@@ -789,6 +1067,7 @@ async function checkAutoAdvance() {
     const next = classes[idx + 1]
     if (next) {
       state.manualOverride = false
+      state.showAllTimes = false
       state.selectedBlock = next.start_time
       buildTimeBlocks()
       applyFilters()
@@ -801,12 +1080,15 @@ async function checkAutoAdvance() {
 setInterval(checkAutoAdvance, 60000)
 
 async function loadRosterEntries() {
-  if (!state.locationId || !state.date) {
+  if (!state.locationId || !state.date || state.locationId === 'all') {
     state.rosterEntries = []
     state.filteredEntries = []
-    if (rosterTable) rosterTable.innerHTML = ''
+    if (rosterTable) if (!rosterTable) return
+  rosterTable.innerHTML = ''
     if (rosterEmpty) {
-      rosterEmpty.textContent = 'Select a location and date to load roster.'
+      rosterEmpty.textContent = state.locationId === 'all'
+        ? 'Select a specific location to load roster.'
+        : 'Select a location and date to load roster.'
       rosterEmpty.classList.remove('hidden')
     }
     return
@@ -829,7 +1111,9 @@ async function loadRosterEntries() {
   buildTimeBlocks()
   buildInstructorFilter()
   applyFilters()
-  renderReports()
+  renderEodSummary()
+  loadHomebaseShiftStatus()
+  if (state.view === 'reports') loadReports()
 }
 
 function nowInTimezone(tz) {
@@ -861,6 +1145,10 @@ function buildTimeBlocks() {
   if (state.locationId === 'all') {
     if (timeActive) timeActive.textContent = 'Global view: time blocks disabled.'
     if (timeBlocks) timeBlocks.classList.add('hidden')
+    if (timeBlockSelect) {
+      timeBlockSelect.innerHTML = ''
+      timeBlockSelect.disabled = true
+    }
     return
   }
   const classes = Array.isArray(state.classInstances) ? state.classInstances : []
@@ -868,9 +1156,13 @@ function buildTimeBlocks() {
   if (!times.length) {
     if (timeActive) timeActive.textContent = 'No classes today.'
     if (timeBlocks) timeBlocks.classList.add('hidden')
+    if (timeBlockSelect) {
+      timeBlockSelect.innerHTML = ''
+      timeBlockSelect.disabled = true
+    }
     return
   }
-  const tz = 'America/New_York'
+  const tz = getLocationTimeZone()
   const now = nowInTimezone(tz)
 
   // Determine active class
@@ -891,29 +1183,37 @@ function buildTimeBlocks() {
     active = classes.find((c) => c.start_time == state.selectedBlock) || active
   }
 
-  state.selectedBlock = active ? active.start_time : null
-
-  if (timeActive) {
-    const endLabel = active?.end_time ? formatTime(active.end_time) : ''
-    const startLabel = active?.start_time ? formatTime(active.start_time) : ''
-    const label = startLabel ? `${startLabel}${endLabel && '–' + endLabel}` : ''
-    timeActive.textContent = `${label}${active?.class_name ? ' • ' + active.class_name : ''}` || 'No classes today.'
+  if (state.showAllTimes) {
+    state.selectedBlock = null
+    if (timeActive) timeActive.textContent = 'All times'
+  } else {
+    state.selectedBlock = active ? active.start_time : null
+    if (timeActive) {
+      const endLabel = active?.end_time ? formatTime(active.end_time) : ''
+      const startLabel = active?.start_time ? formatTime(active.start_time) : ''
+      const label = startLabel ? `${startLabel}${endLabel && '–' + endLabel}` : ''
+      timeActive.textContent = `${label}${active?.class_name ? ' • ' + active.class_name : ''}` || 'No classes today.'
+    }
   }
 
-  timeBlocks.innerHTML = ''
-  classes.forEach((c) => {
-    const btn = document.createElement('button')
-    btn.textContent = `${formatTime(c.start_time)} ${c.class_name || ''}`
-    btn.classList.toggle('active', c.start_time == state.selectedBlock)
-    btn.addEventListener('click', () => {
-      state.manualOverride = true
-      state.selectedBlock = c.start_time
-      buildTimeBlocks()
-      applyFilters()
+  if (timeBlockSelect) {
+    timeBlockSelect.disabled = false
+    timeBlockSelect.innerHTML = ''
+    const allOpt = document.createElement('option')
+    allOpt.value = 'all'
+    allOpt.textContent = 'All times'
+    timeBlockSelect.appendChild(allOpt)
+    classes.forEach((c) => {
+      const opt = document.createElement('option')
+      opt.value = c.start_time
+      opt.textContent = `${formatTime(c.start_time)} ${c.class_name || ''}`.trim()
+      timeBlockSelect.appendChild(opt)
     })
-    timeBlocks.appendChild(btn)
-  })
-  if (timeBlockToggle) timeBlockToggle.textContent = timeBlocks.classList.contains('hidden') ? 'All times' : 'Hide times'
+    timeBlockSelect.value = state.showAllTimes ? 'all' : (state.selectedBlock || 'all')
+  }
+
+  if (timeBlocks) timeBlocks.classList.add('hidden')
+  if (timeBlockToggle) timeBlockToggle.classList.add('hidden')
 }
 
 
@@ -1062,11 +1362,12 @@ function buildInstructorFilter() {
   const instructors = new Set()
   const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
   rosterEntries.forEach((r) => {
-    if (r.actual_instructor) instructors.add(r.actual_instructor)
-    else if (r.scheduled_instructor) instructors.add(r.scheduled_instructor)
-    else if (r.instructor_name) instructors.add(r.instructor_name)
+    const raw = r.actual_instructor || r.scheduled_instructor || r.instructor_name
+    const normalized = normalizeInstructorName(raw)
+    if (normalized) instructors.add(normalized)
   })
   const list = Array.from(instructors).sort()
+  if (!instructorFilter) return
   instructorFilter.innerHTML = ''
   const allOpt = document.createElement('option')
   allOpt.value = 'all'
@@ -1090,7 +1391,10 @@ function applyFilters() {
     filtered = filtered.filter((r) => r.start_time === selected)
   }
   if (state.instructorFilter !== 'all') {
-    filtered = filtered.filter((r) => (r.actual_instructor || r.scheduled_instructor || r.instructor_name) === state.instructorFilter)
+    filtered = filtered.filter((r) => {
+      const raw = r.actual_instructor || r.scheduled_instructor || r.instructor_name
+      return normalizeInstructorName(raw) === state.instructorFilter
+    })
   }
   if (search) {
     filtered = filtered.filter((r) => {
@@ -1106,14 +1410,14 @@ function applyFilters() {
     if (state.sortBy === 'name') {
       return (a.swimmer_name || '').localeCompare(b.swimmer_name || '')
     }
-    const instA = (a.actual_instructor || a.scheduled_instructor || a.instructor_name || '')
-    const instB = (b.actual_instructor || b.scheduled_instructor || b.instructor_name || '')
+    const instA = normalizeInstructorName(a.actual_instructor || a.scheduled_instructor || a.instructor_name || '')
+    const instB = normalizeInstructorName(b.actual_instructor || b.scheduled_instructor || b.instructor_name || '')
     if (instA === instB) return (a.swimmer_name || '').localeCompare(b.swimmer_name || '')
     return instA.localeCompare(instB)
   })
 
   state.filteredEntries = filtered
-  rosterMeta.textContent = `(${filtered.length} swimmers)`
+  if (rosterMeta) if (rosterMeta) rosterMeta.textContent = `(${filtered.length} swimmers)`
   renderRoster()
 }
 
@@ -1291,7 +1595,8 @@ async function loadObservationDashboard() {
     observations.forEach((obs) => {
       const item = document.createElement('div')
       item.className = 'list-item'
-      item.innerHTML = `<strong>${obs.instructor_name || 'Instructor'}</strong>
+      const instructor = normalizeInstructorName(obs.instructor_name || 'Instructor')
+      item.innerHTML = `<strong>${instructor || 'Instructor'}</strong>
         <div class="muted tiny">${obs.class_date || '—'} ${obs.class_time || ''}</div>
         <div class="muted tiny">${obs.notes || ''}</div>`
       obsDashboardList.appendChild(item)
@@ -1308,6 +1613,7 @@ function setRosterStatus(textValue) {
 
 function renderRoster() {
   if (state.view !== 'roster') return
+  if (!rosterTable) return
   rosterTable.innerHTML = ''
   if (!state.filteredEntries.length) {
     rosterEmpty.classList.remove('hidden')
@@ -1366,10 +1672,12 @@ function renderRoster() {
     levelCell.dataset.label = 'Level'
     levelCell.textContent = entry.level || ''
 
-        const instructorCell = document.createElement('td')
+    const instructorCell = document.createElement('td')
     instructorCell.dataset.label = 'Instructor'
-    const actual = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || ''
-    const scheduled = entry.scheduled_instructor || ''
+    const actualRaw = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || ''
+    const scheduledRaw = entry.scheduled_instructor || ''
+    const actual = normalizeInstructorName(actualRaw)
+    const scheduled = normalizeInstructorName(scheduledRaw)
     const isSub = entry.is_sub && scheduled && actual && actual !== scheduled
     instructorCell.innerHTML = isSub
       ? `<div><strong>${actual}</strong></div><div class="muted tiny">Scheduled: ${scheduled}</div>`
@@ -1377,22 +1685,39 @@ function renderRoster() {
 
     const zoneCell = document.createElement('td')
     zoneCell.dataset.label = 'Zone'
-    zoneCell.textContent = entry.zone ? String(entry.zone) : '—'
+    zoneCell.textContent = entry.zone ? `Zone ${entry.zone}` : '—'
 
-    const actionCell = document.createElement('td')
-    actionCell.dataset.label = 'Action'
+    const notesCell = document.createElement('td')
+    notesCell.dataset.label = 'Notes'
     const noteBtn = document.createElement('button')
     noteBtn.className = 'secondary miniBtn'
-    noteBtn.textContent = '+ Note'
+    noteBtn.textContent = 'Notes'
     noteBtn.addEventListener('click', () => openRosterNote(entry.id))
-    actionCell.appendChild(noteBtn)
+    notesCell.appendChild(noteBtn)
+    if (entry.ssp_passed) {
+      const badge = document.createElement('span')
+      badge.className = 'flag-chip'
+      badge.textContent = 'SSP ✓'
+      notesCell.appendChild(badge)
+    }
+
+    const actionsCell = document.createElement('td')
+    actionsCell.dataset.label = 'Actions'
+    const canBilling = getEffectiveRoleKey() === 'admin' || getEffectiveRoleKey() === 'manager'
+    if (canBilling) {
+      const billingBtn = document.createElement('button')
+      billingBtn.className = 'secondary miniBtn'
+      billingBtn.textContent = 'Billing Flag'
+      billingBtn.addEventListener('click', () => openBillingFlag(entry))
+      actionsCell.appendChild(billingBtn)
+    }
 
     if (entry.instructor_staff_id) {
       const instrNoteBtn = document.createElement('button')
       instrNoteBtn.className = 'secondary miniBtn'
-      instrNoteBtn.textContent = 'Instructor Note'
+      instrNoteBtn.textContent = 'Staff Note'
       instrNoteBtn.addEventListener('click', () => openEntityNote('instructor', entry.instructor_staff_id))
-      actionCell.appendChild(instrNoteBtn)
+      actionsCell.appendChild(instrNoteBtn)
     }
 
     tr.appendChild(attendanceCell)
@@ -1402,7 +1727,8 @@ function renderRoster() {
     tr.appendChild(levelCell)
     tr.appendChild(instructorCell)
     tr.appendChild(zoneCell)
-    tr.appendChild(actionCell)
+    tr.appendChild(notesCell)
+    tr.appendChild(actionsCell)
 
     rosterTable.appendChild(tr)
   })
@@ -1544,84 +1870,129 @@ function renderAlerts(alerts) {
 }
 
 
-function renderReportPreflight(data) {
-  reportPreflight.innerHTML = ''
+function getReportUploadElements(type) {
+  const card = document.querySelector(`.report-upload[data-report-type="${type}"]`)
+  return {
+    card,
+    fileInput: card?.querySelector(`[data-report-file="${type}"]`),
+    status: card?.querySelector(`[data-report-status="${type}"]`),
+    summary: card?.querySelector(`[data-report-summary="${type}"]`)
+  }
+}
+
+function formatReportRanges(ranges) {
+  const list = Array.isArray(ranges) ? ranges : []
+  const text = list.map((r) => r.raw || `${r.start || ''} ${r.end || ''}`.trim()).filter(Boolean)
+  return text.length ? text.join(', ') : 'Unknown'
+}
+
+function setReportUploadStatus(type, message) {
+  const { status } = getReportUploadElements(type)
+  if (status) status.textContent = message || ''
+}
+
+function renderReportUploadSummary(type, data) {
+  const { summary } = getReportUploadElements(type)
+  if (!summary) return
+  summary.innerHTML = ''
   if (!data) return
   const item = document.createElement('div')
   item.className = 'list-item'
-  item.innerHTML = `<strong>${data.reportType || 'unknown'}</strong>`
-  const locRow = document.createElement('div')
-  locRow.className = 'muted tiny'
-  locRow.textContent = `Detected location: ${data.detectedLocationName || 'unknown'}`
-  const rangeRow = document.createElement('div')
-  rangeRow.className = 'muted tiny'
-  const rangeText = (data.dateRanges || []).map((r) => r.raw || `${r.start || ''} ${r.end || ''}`.trim()).join(', ')
-  rangeRow.textContent = `Date range: ${rangeText || 'unknown'}`
-  item.appendChild(locRow)
-  item.appendChild(rangeRow)
-  reportPreflight.appendChild(item)
+  item.innerHTML = `<strong>${data.reportType || type}</strong>
+    <div class="muted tiny">Detected location: ${data.detectedLocationName || 'Unknown'}</div>
+    <div class="muted tiny">Date range: ${formatReportRanges(data.dateRanges)}</div>`
+  if (data.warnings && data.warnings.length) {
+    const warn = document.createElement('div')
+    warn.className = 'muted tiny'
+    warn.textContent = `Warnings: ${data.warnings.join(', ')}`
+    item.appendChild(warn)
+  }
+  summary.appendChild(item)
 }
 
-async function runReportPreflight() {
-  if (!state.locationId) return
-  const file = reportFile?.files?.[0]
-  if (!file) {
-    reportStatus.textContent = 'Select a report file first.'
-    return
+async function preflightReportUpload(type) {
+  if (!state.locationId || state.locationId === 'all') {
+    setReportUploadStatus(type, 'Select a specific location to upload.')
+    return null
   }
-
-  const formData = new FormData()
-  formData.append('file', file)
-  reportStatus.textContent = 'Running preflight...'
+  const { fileInput } = getReportUploadElements(type)
+  const file = fileInput?.files?.[0]
+  if (!file) {
+    setReportUploadStatus(type, 'Select a report file first.')
+    return null
+  }
+  setReportUploadStatus(type, 'Running preflight...')
   try {
-    const data = await apiFetch(`/reports/preflight?locationId=${state.locationId}`, {
+    const formData = new FormData()
+    formData.append('file', file)
+    const data = await apiFetch(`/reports/preflight?locationId=${state.locationId}&reportType=${encodeURIComponent(type)}`, {
       method: 'POST',
       body: formData
     })
-    state.reportPreflight = data
-    renderReportPreflight(data)
-    reportStatus.textContent = 'Preflight OK.'
+    reportPreflightCache[type] = { file, data }
+    renderReportUploadSummary(type, data)
+    setReportUploadStatus(type, 'Preflight OK.')
+    return data
   } catch (err) {
-    reportStatus.textContent = err?.code || err?.error || 'Preflight failed'
-    state.reportPreflight = null
-    renderReportPreflight(null)
+    setReportUploadStatus(type, err?.code || err?.error || 'Preflight failed')
+    reportPreflightCache[type] = null
+    renderReportUploadSummary(type, null)
+    return null
   }
 }
 
-async function uploadReport() {
-  if (!state.locationId) return
-  if (!reportConfirm.checked) {
-    reportStatus.textContent = 'Please confirm the report location before upload.'
+async function openReportConfirm(type) {
+  if (!reportConfirmModal || !reportConfirmSummary || !reportConfirmRun) return
+  if (!state.locationId || state.locationId === 'all') {
+    setReportUploadStatus(type, 'Select a specific location to upload.')
     return
   }
-  const file = reportFile?.files?.[0]
-  if (!file) {
-    reportStatus.textContent = 'Select a report file first.'
-    return
+  let cached = reportPreflightCache[type]
+  if (!cached) {
+    const data = await preflightReportUpload(type)
+    cached = data ? { file: getReportUploadElements(type).fileInput?.files?.[0], data } : null
   }
+  if (!cached || !cached.file) return
+  pendingReportUpload = { type, file: cached.file, preflight: cached.data }
+  const loc = state.locations.find((l) => l.id === state.locationId)
+  const locLabel = loc ? loc.name : state.locationId
+  reportConfirmSummary.textContent = `Location: ${locLabel}\nReport type: ${cached.data?.reportType || type}\nDate range: ${formatReportRanges(cached.data?.dateRanges)}`
+  if (cached.data?.reportType && cached.data.reportType !== type) {
+    reportConfirmSummary.textContent += `\nWarning: detected type ${cached.data.reportType}`
+  }
+  if (reportConfirmCheckbox) reportConfirmCheckbox.checked = false
+  reportConfirmRun.disabled = true
+  if (reportConfirmStatus) reportConfirmStatus.textContent = ''
+  reportConfirmModal.classList.remove('hidden')
+  reportConfirmModal.style.pointerEvents = 'auto'
+}
 
-  const formData = new FormData()
-  formData.append('file', file)
-  reportStatus.textContent = 'Uploading report...'
+function closeReportConfirm() {
+  if (!reportConfirmModal) return
+  reportConfirmModal.classList.add('hidden')
+  reportConfirmModal.style.pointerEvents = 'none'
+  pendingReportUpload = null
+}
+
+async function runReportConfirm() {
+  if (!pendingReportUpload) return
+  if (!reportConfirmCheckbox?.checked) {
+    if (reportConfirmStatus) reportConfirmStatus.textContent = 'Please confirm before uploading.'
+    return
+  }
+  if (reportConfirmStatus) reportConfirmStatus.textContent = 'Uploading...'
   try {
-    const data = await apiFetch(`/reports/upload?locationId=${state.locationId}`, {
+    const formData = new FormData()
+    formData.append('file', pendingReportUpload.file)
+    await apiFetch(`/reports/upload?locationId=${state.locationId}&reportType=${encodeURIComponent(pendingReportUpload.type)}`, {
       method: 'POST',
       body: formData
     })
-    reportStatus.textContent = `Report uploaded (${data.preflight?.reportType || 'unknown'})`
+    setReportUploadStatus(pendingReportUpload.type, 'Report uploaded.')
+    closeReportConfirm()
+    loadUploads()
   } catch (err) {
-    reportStatus.textContent = err?.code || err?.error || 'Report upload failed'
-  }
-}
-
-
-async function loadRetentionAnalytics() {
-  if (!state.locationId || state.locationId === 'all') return
-  try {
-    const data = await apiFetch(`/analytics/retention?locationId=${state.locationId}`)
-    renderRetention(data.summary || [])
-  } catch {
-    renderRetention([])
+    if (reportConfirmStatus) reportConfirmStatus.textContent = err?.code || err?.error || 'Report upload failed'
   }
 }
 
@@ -1756,35 +2127,99 @@ function renderActivityFeed() {
   })
 }
 
-async function loadNotifications() {
-  if (!notificationList) return
-  if (!state.locationId || state.locationId === 'all') {
-    notificationList.innerHTML = '<div class="hint">Select a specific location to view notifications.</div>'
+async function loadBillingTickets() {
+  if (!billingQueueList) return
+  const role = getEffectiveRoleKey()
+  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  if (!locationId) {
+    billingQueueList.innerHTML = '<div class="hint">Select a location to view billing tickets.</div>'
     return
   }
-  notificationList.innerHTML = '<div class="hint">Loading notifications…</div>'
+  billingQueueList.innerHTML = '<div class="hint">Loading billing tickets…</div>'
   try {
-    const data = await apiFetch(`/notifications?locationId=${state.locationId}`)
-    renderNotifications(data.notifications || [])
+    const params = new URLSearchParams()
+    params.set('locationId', locationId)
+    if (billingStatusFilter?.value) params.set('status', billingStatusFilter.value)
+    const data = await apiFetch(`/billing/tickets?${params.toString()}`)
+    renderBillingTickets(data.tickets || [])
   } catch (err) {
-    notificationList.innerHTML = `<div class="hint">${err?.error || 'Failed to load notifications.'}</div>`
+    billingQueueList.innerHTML = `<div class="hint">${err?.error || 'Failed to load billing tickets.'}</div>`
   }
 }
 
-function renderNotifications(items) {
-  if (!notificationList) return
-  notificationList.innerHTML = ''
+function renderBillingTickets(tickets) {
+  if (!billingQueueList) return
+  billingQueueList.innerHTML = ''
+  if (!tickets.length) {
+    billingQueueList.innerHTML = '<div class="hint">No billing tickets.</div>'
+    return
+  }
+  tickets.forEach((t) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${t.reason || 'Billing ticket'}</strong>
+      <div class="muted tiny">${t.status || ''} • ${t.priority || ''} • ${t.location_name || ''}</div>`
+    billingQueueList.appendChild(item)
+  })
+}
+
+async function loadNotifications() {
+  await loadNotificationsByChannel('general')
+  await loadNotificationsByChannel('manager')
+}
+
+async function loadNotificationsByChannel(channel) {
+  const list = channel === 'manager' ? managerNotificationList : notificationList
+  if (!list) return
+  const role = getEffectiveRoleKey()
+  if (channel === 'manager' && !(role === 'admin' || role === 'manager')) {
+    list.innerHTML = '<div class="hint">Manager notifications are restricted.</div>'
+    return
+  }
+  list.innerHTML = '<div class="hint">Loading notifications…</div>'
+  try {
+    const params = new URLSearchParams()
+    if (state.locationId) params.set('locationId', state.locationId)
+    else if (role === 'admin') params.set('locationId', 'all')
+    params.set('channel', channel)
+    const data = await apiFetch(`/notifications?${params.toString()}`)
+    renderNotifications(list, data.notifications || [])
+  } catch (err) {
+    list.innerHTML = `<div class="hint">${err?.error || 'Failed to load notifications.'}</div>`
+  }
+}
+
+function renderNotifications(list, items) {
+  if (!list) return
+  list.innerHTML = ''
   if (!items.length) {
-    notificationList.innerHTML = '<div class="hint">No notifications yet.</div>'
+    list.innerHTML = '<div class="hint">No notifications yet.</div>'
     return
   }
   items.forEach((n) => {
     const row = document.createElement('div')
     row.className = 'list-item'
     row.innerHTML = `<strong>${n.title || 'Notification'}</strong>
-      <div class="muted tiny">${n.message || ''}</div>
+      <div class="muted tiny">${n.body || n.message || ''}</div>
       <div class="muted tiny">${n.created_at ? new Date(n.created_at).toLocaleString() : ''}</div>`
-    notificationList.appendChild(row)
+    if (!n.read_at && n.id) {
+      const markBtn = document.createElement('button')
+      markBtn.className = 'secondary miniBtn'
+      markBtn.textContent = 'Mark read'
+      markBtn.addEventListener('click', async () => {
+        try {
+          await apiFetch('/notifications/read', {
+            method: 'POST',
+            body: JSON.stringify({ notificationId: n.id })
+          })
+          row.classList.add('muted')
+        } catch {
+          // ignore
+        }
+      })
+      row.appendChild(markBtn)
+    }
+    list.appendChild(row)
   })
 }
 
@@ -1871,7 +2306,13 @@ function applySavedView(view) {
     setView('roster')
     if (view.filters?.date) state.date = view.filters.date
     if (view.filters?.rosterMode) state.rosterMode = view.filters.rosterMode
-    if (view.filters?.selectedBlock) state.selectedBlock = view.filters.selectedBlock
+    if (view.filters?.selectedBlock) {
+      state.selectedBlock = view.filters.selectedBlock
+      state.showAllTimes = false
+    } else {
+      state.selectedBlock = null
+      state.showAllTimes = true
+    }
     if (sortBy && view.filters?.sortBy) sortBy.value = view.filters.sortBy
     if (instructorFilter && view.filters?.instructor) instructorFilter.value = view.filters.instructor
     if (rosterSearch && view.filters?.search) rosterSearch.value = view.filters.search
@@ -1896,25 +2337,6 @@ function saveCurrentView(viewKey) {
   renderCommandPalette()
 }
 
-function renderRetention(summary) {
-  const rows = Array.isArray(summary) ? summary : []
-  retentionTable.innerHTML = ''
-  if (!rows.length) {
-    retentionTable.innerHTML = '<div class="hint">No retention data yet.</div>'
-    return
-  }
-  rows.forEach((item) => {
-    const latest = item.latest || {}
-    const row = document.createElement('div')
-    row.className = 'list-item'
-    row.innerHTML = `<strong>${item.instructorName}</strong>
-      <div class="muted tiny">Latest: ${latest.retention_percent || '—'}% (${latest.ending_headcount || '—'} / ${latest.starting_headcount || '—'})</div>
-      <div class="muted tiny">Delta: ${item.retentionDelta === null ? '—' : item.retentionDelta.toFixed(2)}%</div>`
-    retentionTable.appendChild(row)
-  })
-}
-
-
 let paletteIndex = 0
 let paletteItems = []
 
@@ -1925,7 +2347,7 @@ function buildPaletteCommands() {
   const add = (label, action) => commands.push({ label, action })
   add('Roster', () => setView('roster'))
   add('Uploads', () => setView('uploads'))
-  add('Reports', () => setView('reports'))
+  add('Reports', () => { setView('reports'); loadReports() })
   add('Observations', () => setView('observations'))
   add('Staff', () => setView('staff'))
   add('Intakes', () => setView('intakes'))
@@ -2033,8 +2455,18 @@ async function openEntityNote(entityType, entityId) {
   state.rosterNoteEntryId = null
   rosterNoteText.value = ''
   if (sspStatus) sspStatus.textContent = ''
+  if (sspRevokeBtn) sspRevokeBtn.classList.add('hidden')
   rosterNoteModal.classList.remove('hidden')
   rosterNoteModal.style.pointerEvents = 'auto'
+  if (entityType === 'roster_entry') {
+    const entry = (state.rosterEntries || []).find((r) => r.id === entityId)
+    if (entry?.ssp_passed) {
+      if (sspStatus) sspStatus.textContent = 'SSP passed'
+      if (sspRevokeBtn) sspRevokeBtn.classList.remove('hidden')
+    } else {
+      if (sspStatus) sspStatus.textContent = 'SSP not passed'
+    }
+  }
   try {
     const data = await apiFetch(`/notes?entityType=${entityType}&entityId=${entityId}&locationId=${state.locationId}`)
     const noteObj = (data.notes && data.notes[0]) ? data.notes[0] : null
@@ -2113,6 +2545,59 @@ async function markSspPassed() {
   }
 }
 
+async function markSspRevoked() {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  if (!entryId || !state.locationId) return
+  if (sspStatus) sspStatus.textContent = 'Revoking SSP…'
+  try {
+    const cls = getSelectedClassInstance()
+    await apiFetch('/ssp/revoke', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        rosterEntryId: entryId,
+        classInstanceId: cls?.id || null
+      })
+    })
+    if (sspStatus) sspStatus.textContent = 'SSP revoked'
+    const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+    const entry = rosterEntries.find((r) => r.id === entryId)
+    if (entry) entry.ssp_passed = false
+    renderRoster()
+    loadNotifications()
+  } catch (err) {
+    if (sspStatus) sspStatus.textContent = err?.error || 'SSP revoke failed'
+  }
+}
+
+async function openBillingFlag(entry) {
+  const role = getEffectiveRoleKey()
+  if (!(role === 'admin' || role === 'manager')) {
+    alert('Billing flags are manager-only.')
+    return
+  }
+  if (!state.locationId) return
+  const reason = prompt('Billing flag reason?')
+  if (!reason) return
+  try {
+    await apiFetch('/billing/tickets', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        childExternalId: entry?.swimmer_external_id || null,
+        reason,
+        priority: 'med',
+        status: 'open'
+      })
+    })
+    setRosterStatus('Billing ticket created ✓')
+    setTimeout(() => setRosterStatus(''), 1500)
+    loadBillingTickets()
+  } catch (err) {
+    setRosterStatus(err?.error || 'Billing ticket failed')
+  }
+}
+
 async function loadLineage() {
   if (!lineageClassId || !lineageOutput) return
   const id = (lineageClassId.value || '').trim()
@@ -2176,47 +2661,597 @@ function addLocalSwimmer() {
   closeAddSwimmer()
 }
 
-function renderReports() {
-  const counts = new Map()
-  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
-  rosterEntries.forEach((entry) => {
-    const name = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || 'Unassigned'
-    counts.set(name, (counts.get(name) || 0) + 1)
-  })
-  reportList.innerHTML = ''
-  if (!counts.size) {
-    reportList.innerHTML = '<div class="hint">No roster data loaded.</div>'
-    return
+function setReportsStatus(message) {
+  if (reportsStatus) reportsStatus.textContent = message || ''
+}
+
+function ensureReportDates() {
+  if (!reportStartDate || !reportEndDate) return
+  if (!reportStartDate.value || !reportEndDate.value) {
+    const end = state.date ? new Date(state.date) : new Date()
+    const start = new Date(end)
+    start.setDate(end.getDate() - 6)
+    reportStartDate.value = formatDateInputValue(start)
+    reportEndDate.value = formatDateInputValue(end)
   }
-  Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([name, count]) => {
-    const item = document.createElement('div')
-    item.className = 'list-item'
-    item.innerHTML = `<strong>${name}</strong><div class="muted tiny">${count} swimmers</div>`
-    reportList.appendChild(item)
+}
+
+function getReportFilters() {
+  return {
+    start: reportStartDate?.value || '',
+    end: reportEndDate?.value || '',
+    instructor: reportInstructorFilter?.value || '',
+    program: reportProgramFilter?.value || ''
+  }
+}
+
+function populateReportFilters(options = {}) {
+  const instructors = Array.isArray(options.instructors) ? options.instructors : []
+  const programs = Array.isArray(options.programs) ? options.programs : []
+  if (reportInstructorFilter) {
+    const current = reportInstructorFilter.value || ''
+    reportInstructorFilter.innerHTML = ''
+    const allOpt = document.createElement('option')
+    allOpt.value = ''
+    allOpt.textContent = 'All'
+    reportInstructorFilter.appendChild(allOpt)
+    instructors.forEach((name) => {
+      const opt = document.createElement('option')
+      opt.value = name
+      opt.textContent = name
+      reportInstructorFilter.appendChild(opt)
+    })
+    reportInstructorFilter.value = current
+  }
+  if (reportProgramFilter) {
+    const current = reportProgramFilter.value || ''
+    reportProgramFilter.innerHTML = ''
+    const allOpt = document.createElement('option')
+    allOpt.value = ''
+    allOpt.textContent = 'All'
+    reportProgramFilter.appendChild(allOpt)
+    programs.forEach((name) => {
+      const opt = document.createElement('option')
+      opt.value = name
+      opt.textContent = name
+      reportProgramFilter.appendChild(opt)
+    })
+    reportProgramFilter.value = current
+  }
+}
+
+function renderKpis(container, items) {
+  if (!container) return
+  container.innerHTML = ''
+  items.forEach((item) => {
+    const div = document.createElement('div')
+    div.className = 'kpi'
+    div.innerHTML = `<strong>${item.label}</strong> ${item.value}`
+    container.appendChild(div)
   })
 }
 
-async function loadUploads() {
-  if (!state.locationId || state.locationId === 'all') {
-    if (uploadList) uploadList.innerHTML = '<div class="hint">Select a specific location to view uploads.</div>'
+function renderChart(canvasEl, config, existing) {
+  if (!canvasEl || !window.Chart) return null
+  if (existing) existing.destroy()
+  return new window.Chart(canvasEl, config)
+}
+
+function renderAttendanceReport(data) {
+  if (!attendanceTable || !attendanceKpis) return
+  if (!data) {
+    attendanceTable.innerHTML = '<div class="hint">No attendance data.</div>'
+    renderKpis(attendanceKpis, [])
     return
   }
-  const data = await apiFetch(`/roster-uploads?locationId=${state.locationId}`)
-  uploadList.innerHTML = ''
-  ;(data.uploads || []).forEach((upload) => {
+  const summary = data.summary || {}
+  renderKpis(attendanceKpis, [
+    { label: 'Total', value: summary.total || 0 },
+    { label: 'Present', value: summary.present || 0 },
+    { label: 'Absent', value: summary.absent || 0 },
+    { label: 'Unknown', value: summary.unknown || 0 }
+  ])
+
+  const byDate = Array.isArray(data.byDate) ? data.byDate : []
+  const labels = byDate.map((d) => d.date)
+  const present = byDate.map((d) => d.present || 0)
+  const absent = byDate.map((d) => d.absent || 0)
+  attendanceChart = renderChart(attendanceChartEl, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Present', data: present, borderColor: '#00FF7B', backgroundColor: 'rgba(0,255,123,0.2)', tension: 0.2 },
+        { label: 'Absent', data: absent, borderColor: '#FF2B2B', backgroundColor: 'rgba(255,43,43,0.2)', tension: 0.2 }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  }, attendanceChart)
+
+  const byInstructor = Array.isArray(data.byInstructor) ? data.byInstructor : []
+  attendanceTable.innerHTML = ''
+  if (!byInstructor.length) {
+    attendanceTable.innerHTML = '<div class="hint">No instructor breakdown.</div>'
+    return
+  }
+  byInstructor.forEach((row) => {
     const item = document.createElement('div')
     item.className = 'list-item'
-    item.innerHTML = `<div><strong>${upload.original_filename}</strong><div class="tiny muted">${new Date(upload.uploaded_at).toLocaleString()}</div></div><div class="tiny muted">${upload.parse_status}</div>`
-    uploadList.appendChild(item)
+    item.innerHTML = `<strong>${formatInstructorLabel(row.instructor)}</strong>
+      <div class="muted tiny">Present ${row.present || 0} • Absent ${row.absent || 0} • Unknown ${row.unknown || 0}</div>`
+    attendanceTable.appendChild(item)
+  })
+}
+
+function renderInstructorLoadReport(data) {
+  if (!instructorTable) return
+  if (!data) {
+    instructorTable.innerHTML = '<div class="hint">No instructor data.</div>'
+    return
+  }
+  const byDate = Array.isArray(data.byDate) ? data.byDate : []
+  const labels = byDate.map((d) => d.date)
+  const swimmers = byDate.map((d) => d.swimmers || 0)
+  instructorChart = renderChart(instructorChartEl, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{ label: 'Swimmers', data: swimmers, backgroundColor: 'rgba(0,229,255,0.35)' }]
+    },
+    options: { responsive: true, plugins: { legend: { display: false } } }
+  }, instructorChart)
+
+  const rows = Array.isArray(data.byInstructor) ? data.byInstructor : []
+  instructorTable.innerHTML = ''
+  if (!rows.length) {
+    instructorTable.innerHTML = '<div class="hint">No instructor load data.</div>'
+    return
+  }
+  rows.forEach((row) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${formatInstructorLabel(row.instructor)}</strong>
+      <div class="muted tiny">Classes ${row.classes || 0} • Swimmers ${row.swimmers || 0} • Sub % ${row.subRate || 0}%</div>`
+    instructorTable.appendChild(item)
+  })
+}
+
+function renderRosterHealthReport(data) {
+  if (!rosterHealthTable || !rosterHealthKpis) return
+  if (!data) {
+    rosterHealthTable.innerHTML = '<div class="hint">No roster health data.</div>'
+    renderKpis(rosterHealthKpis, [])
+    return
+  }
+  renderKpis(rosterHealthKpis, [
+    { label: 'Missing zones', value: data.summary?.missingZones || 0 },
+    { label: 'Missing instructors', value: data.summary?.missingInstructors || 0 },
+    { label: 'Duplicates', value: data.summary?.duplicates || 0 }
+  ])
+  rosterHealthTable.innerHTML = ''
+  const issues = []
+  ;(data.missingZones || []).forEach((row) => issues.push({ label: 'Missing zone', row }))
+  ;(data.missingInstructors || []).forEach((row) => issues.push({ label: 'Missing instructor', row }))
+  ;(data.duplicates || []).forEach((row) => issues.push({ label: 'Duplicate', row }))
+  if (!issues.length) {
+    rosterHealthTable.innerHTML = '<div class="hint">No data issues detected.</div>'
+    return
+  }
+  issues.forEach((issue) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${issue.label}</strong>
+      <div class="muted tiny">${issue.row.swimmer_name || ''} • ${issue.row.class_date || ''} ${issue.row.start_time || ''} • ${issue.row.class_name || ''}</div>`
+    rosterHealthTable.appendChild(item)
+  })
+}
+
+function renderSspReport(data) {
+  if (!sspTable) return
+  if (!data) {
+    sspTable.innerHTML = '<div class="hint">No SSP data.</div>'
+    return
+  }
+  const byDate = Array.isArray(data.byDate) ? data.byDate : []
+  const labels = byDate.map((d) => d.date)
+  const counts = byDate.map((d) => d.count || 0)
+  sspChart = renderChart(sspChartEl, {
+    type: 'line',
+    data: { labels, datasets: [{ label: 'SSP Passes', data: counts, borderColor: '#0EA5E9', backgroundColor: 'rgba(14,165,233,0.2)', tension: 0.2 }] },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  }, sspChart)
+
+  const rows = Array.isArray(data.byInstructor) ? data.byInstructor : []
+  sspTable.innerHTML = ''
+  if (!rows.length) {
+    sspTable.innerHTML = '<div class="hint">No SSP passes yet.</div>'
+    return
+  }
+  rows.forEach((row) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${formatInstructorLabel(row.instructor)}</strong>
+      <div class="muted tiny">Passes ${row.count || 0}</div>`
+    sspTable.appendChild(item)
+  })
+}
+
+function renderEnrollmentReport(data) {
+  if (!enrollmentTable) return
+  if (!data) {
+    enrollmentTable.innerHTML = '<div class="hint">No enrollment data.</div>'
+    return
+  }
+  const leads = Array.isArray(data.leads) ? data.leads : []
+  const enrollments = Array.isArray(data.enrollments) ? data.enrollments : []
+  const dates = Array.from(new Set([...leads.map((l) => l.date), ...enrollments.map((e) => e.date)])).sort()
+  const leadMap = new Map(leads.map((l) => [l.date, l.count || 0]))
+  const enrollMap = new Map(enrollments.map((e) => [e.date, e.count || 0]))
+  const leadCounts = dates.map((d) => leadMap.get(d) || 0)
+  const enrollCounts = dates.map((d) => enrollMap.get(d) || 0)
+
+  enrollmentChart = renderChart(enrollmentChartEl, {
+    type: 'line',
+    data: {
+      labels: dates,
+      datasets: [
+        { label: 'Leads', data: leadCounts, borderColor: '#0EA5E9', backgroundColor: 'rgba(14,165,233,0.2)', tension: 0.2 },
+        { label: 'Enrollments', data: enrollCounts, borderColor: '#22C55E', backgroundColor: 'rgba(34,197,94,0.2)', tension: 0.2 }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { position: 'bottom' } } }
+  }, enrollmentChart)
+
+  enrollmentTable.innerHTML = ''
+  if (!dates.length) {
+    enrollmentTable.innerHTML = '<div class="hint">No enrollment activity.</div>'
+    return
+  }
+  dates.forEach((date) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${date}</strong>
+      <div class="muted tiny">Leads ${leadMap.get(date) || 0} • Enrollments ${enrollMap.get(date) || 0}</div>`
+    enrollmentTable.appendChild(item)
+  })
+}
+
+function renderRetentionReport(data) {
+  if (!retentionTable) return
+  const rows = Array.isArray(data?.rows) ? data.rows : []
+  retentionTable.innerHTML = ''
+  if (!rows.length) {
+    retentionTable.innerHTML = '<div class="hint">No retention data.</div>'
+    return
+  }
+  rows.forEach((row) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${row.instructor_name || ''}</strong>
+      <div class="muted tiny">Booked ${row.booked || 0} • Retained ${row.retained || 0} • ${row.percent_this_cycle || 0}%</div>`
+    retentionTable.appendChild(item)
+  })
+}
+
+function renderAgedAccountsReport(data) {
+  if (!agedAccountsTable) return
+  const rows = Array.isArray(data?.rows) ? data.rows : []
+  agedAccountsTable.innerHTML = ''
+  if (!rows.length) {
+    agedAccountsTable.innerHTML = '<div class="hint">No aged accounts data.</div>'
+    return
+  }
+  rows.forEach((row) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${row.bucket || 'Bucket'}</strong>
+      <div class="muted tiny">Amount ${row.amount || 0} • Total ${row.total || 0}</div>`
+    agedAccountsTable.appendChild(item)
+  })
+}
+
+function renderDropListReport(data) {
+  if (!dropListTable) return
+  const rows = Array.isArray(data?.rows) ? data.rows : []
+  dropListTable.innerHTML = ''
+  if (!rows.length) {
+    dropListTable.innerHTML = '<div class="hint">No drop list entries.</div>'
+    return
+  }
+  rows.forEach((row) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${row.swimmer_name || ''}</strong>
+      <div class="muted tiny">${row.drop_date || ''} • ${row.reason || ''}</div>`
+    dropListTable.appendChild(item)
+  })
+}
+
+function renderContacts() {
+  if (!contactsTable || !contactsDuplicates) return
+  contactsTable.innerHTML = ''
+  contactsDuplicates.innerHTML = ''
+  const contacts = Array.isArray(state.contacts) ? state.contacts : []
+  const duplicates = Array.isArray(state.contactDuplicates) ? state.contactDuplicates : []
+  if (duplicates.length) {
+    duplicates.forEach((dup) => {
+      const item = document.createElement('div')
+      item.className = 'list-item'
+      item.innerHTML = `<strong>Possible duplicate</strong>
+        <div class="muted tiny">${dup.email || ''} • ${dup.count || 0} contacts</div>`
+      contactsDuplicates.appendChild(item)
+    })
+  }
+  if (!contacts.length) {
+    contactsTable.innerHTML = '<div class="hint">No contacts available.</div>'
+    return
+  }
+  contacts.forEach((c) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    item.innerHTML = `<strong>${c.full_name || 'Contact'}</strong>
+      <div class="muted tiny">${c.email || ''} ${c.phone ? '• ' + c.phone : ''}</div>`
+    const mergeBtn = document.createElement('button')
+    mergeBtn.className = 'secondary miniBtn'
+    mergeBtn.textContent = 'Merge'
+    mergeBtn.addEventListener('click', () => openContactMerge(c.id))
+    item.appendChild(mergeBtn)
+    contactsTable.appendChild(item)
+  })
+}
+
+function csvEscape(value) {
+  const raw = value === null || value === undefined ? '' : String(value)
+  if (raw.includes(',') || raw.includes('"') || raw.includes('\n')) {
+    return `"${raw.replace(/"/g, '""')}"`
+  }
+  return raw
+}
+
+function downloadCsv(filename, rows) {
+  const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function exportAttendanceCsv() {
+  const data = state.reports.attendance
+  if (!data) return
+  const rows = [['Instructor', 'Present', 'Absent', 'Unknown', 'Total']]
+  ;(data.byInstructor || []).forEach((r) => {
+    rows.push([formatInstructorLabel(r.instructor), r.present || 0, r.absent || 0, r.unknown || 0, r.total || 0])
+  })
+  downloadCsv('attendance_report.csv', rows)
+}
+
+function exportInstructorCsv() {
+  const data = state.reports.instructorLoad
+  if (!data) return
+  const rows = [['Instructor', 'Classes', 'Swimmers', 'Sub Count', 'Sub Rate']]
+  ;(data.byInstructor || []).forEach((r) => {
+    rows.push([formatInstructorLabel(r.instructor), r.classes || 0, r.swimmers || 0, r.subCount || 0, r.subRate || 0])
+  })
+  downloadCsv('instructor_load.csv', rows)
+}
+
+function exportRosterHealthCsv() {
+  const data = state.reports.rosterHealth
+  if (!data) return
+  const rows = [['Issue', 'Swimmer', 'Date', 'Time', 'Class']]
+  const add = (label, row) => rows.push([label, row.swimmer_name || '', row.class_date || '', row.start_time || '', row.class_name || ''])
+  ;(data.missingZones || []).forEach((row) => add('Missing zone', row))
+  ;(data.missingInstructors || []).forEach((row) => add('Missing instructor', row))
+  ;(data.duplicates || []).forEach((row) => add('Duplicate', row))
+  downloadCsv('roster_health.csv', rows)
+}
+
+function exportSspCsv() {
+  const data = state.reports.ssp
+  if (!data) return
+  const rows = [['Instructor', 'Passes']]
+  ;(data.byInstructor || []).forEach((r) => {
+    rows.push([formatInstructorLabel(r.instructor), r.count || 0])
+  })
+  downloadCsv('ssp_tracker.csv', rows)
+}
+
+function exportEnrollmentCsv() {
+  const data = state.reports.enrollment
+  if (!data) return
+  const rows = [['Date', 'Leads', 'Enrollments']]
+  const leads = Array.isArray(data.leads) ? data.leads : []
+  const enrollments = Array.isArray(data.enrollments) ? data.enrollments : []
+  const dates = Array.from(new Set([...leads.map((l) => l.date), ...enrollments.map((e) => e.date)])).sort()
+  const leadMap = new Map(leads.map((l) => [l.date, l.count || 0]))
+  const enrollMap = new Map(enrollments.map((e) => [e.date, e.count || 0]))
+  dates.forEach((date) => {
+    rows.push([date, leadMap.get(date) || 0, enrollMap.get(date) || 0])
+  })
+  downloadCsv('enrollment_tracker.csv', rows)
+}
+
+function exportRetentionCsv() {
+  const data = state.reports.retention
+  if (!data) return
+  const rows = [['Instructor', 'Booked', 'Retained', 'Percent']]
+  ;(data.rows || []).forEach((r) => {
+    rows.push([r.instructor_name || '', r.booked || 0, r.retained || 0, r.percent_this_cycle || 0])
+  })
+  downloadCsv('retention_report.csv', rows)
+}
+
+function exportAgedAccountsCsv() {
+  const data = state.reports.agedAccounts
+  if (!data) return
+  const rows = [['Report Date', 'Bucket', 'Amount', 'Total']]
+  ;(data.rows || []).forEach((r) => {
+    rows.push([r.report_date || '', r.bucket || '', r.amount || 0, r.total || 0])
+  })
+  downloadCsv('aged_accounts.csv', rows)
+}
+
+function exportDropListCsv() {
+  const data = state.reports.dropList
+  if (!data) return
+  const rows = [['Drop Date', 'Swimmer', 'Reason']]
+  ;(data.rows || []).forEach((r) => {
+    rows.push([r.drop_date || '', r.swimmer_name || '', r.reason || ''])
+  })
+  downloadCsv('drop_list.csv', rows)
+}
+
+function exportContactsCsv() {
+  const contacts = Array.isArray(state.contacts) ? state.contacts : []
+  const rows = [['Name', 'Email', 'Phone', 'Source']]
+  contacts.forEach((c) => rows.push([c.full_name || '', c.email || '', c.phone || '', c.source || '']))
+  downloadCsv('contacts.csv', rows)
+}
+
+async function loadReports() {
+  const role = getEffectiveRoleKey()
+  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  if (!locationId) {
+    setReportsStatus('Select a location to view reports.')
+    return
+  }
+  ensureReportDates()
+  const filters = getReportFilters()
+  if (!filters.start || !filters.end) {
+    setReportsStatus('Select a date range.')
+    return
+  }
+  setReportsStatus('Loading report…')
+
+  const params = new URLSearchParams({
+    start: filters.start,
+    end: filters.end
+  })
+  if (locationId) params.set('locationId', locationId)
+  if (filters.instructor) params.set('instructor', filters.instructor)
+  if (filters.program) params.set('program', filters.program)
+
+  const fetchReport = async (path) => {
+    try {
+      return await apiFetch(`${path}?${params.toString()}`)
+    } catch {
+      return null
+    }
+  }
+
+  const subtab = state.subtabs.reports || 'enrollment-tracker'
+  if (subtab === 'enrollment-tracker') {
+    const enrollment = await fetchReport('/reports/enrollment-tracker')
+    state.reports.enrollment = enrollment
+    renderEnrollmentReport(enrollment)
+  }
+  if (subtab === 'instructor-retention') {
+    const retention = await fetchReport('/reports/retention')
+    state.reports.retention = retention
+    renderRetentionReport(retention)
+  }
+  if (subtab === 'aged-accounts') {
+    const agedAccounts = await fetchReport('/reports/aged-accounts')
+    state.reports.agedAccounts = agedAccounts
+    renderAgedAccountsReport(agedAccounts)
+  }
+  if (subtab === 'drop-list') {
+    const dropList = await fetchReport('/reports/drop-list')
+    state.reports.dropList = dropList
+    renderDropListReport(dropList)
+  }
+  if (subtab === 'contacts') {
+    await loadContacts()
+  }
+  if (subtab === 'roster-health') {
+    const rosterHealth = await fetchReport('/reports/roster-health')
+    state.reports.rosterHealth = rosterHealth
+    renderRosterHealthReport(rosterHealth)
+  }
+  setReportsStatus('Report updated.')
+}
+
+async function loadContacts() {
+  if (!contactsTable) return
+  const role = getEffectiveRoleKey()
+  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  if (!locationId) {
+    contactsTable.innerHTML = '<div class="hint">Select a location to view contacts.</div>'
+    return
+  }
+  const params = new URLSearchParams()
+  params.set('locationId', locationId)
+  if (contactsSearch?.value) params.set('search', contactsSearch.value)
+  contactsTable.innerHTML = '<div class="hint">Loading contacts…</div>'
+  try {
+    const data = await apiFetch(`/contacts?${params.toString()}`)
+    state.contacts = data.contacts || []
+    state.contactDuplicates = data.duplicates || []
+    renderContacts()
+  } catch (err) {
+    contactsTable.innerHTML = `<div class="hint">${err?.error || 'Failed to load contacts.'}</div>`
+  }
+}
+
+async function openContactMerge(contactId) {
+  const otherId = prompt('Enter the ID of the contact to merge with:')
+  if (!otherId) return
+  try {
+    await apiFetch('/contacts/merge', {
+      method: 'POST',
+      body: JSON.stringify({ contactIds: [contactId, otherId], canonicalId: contactId })
+    })
+    await loadContacts()
+  } catch (err) {
+    alert(err?.error || 'Merge failed')
+  }
+}
+
+async function loadUploads() {
+  const role = getEffectiveRoleKey()
+  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  if (!locationId) {
+    if (uploadHistoryList) uploadHistoryList.innerHTML = '<div class="hint">Select a location to view uploads.</div>'
+    return
+  }
+  const data = await apiFetch(`/uploads/history?locationId=${locationId}`)
+  if (!uploadHistoryList) return
+  uploadHistoryList.innerHTML = ''
+  const items = Array.isArray(data.uploads) ? data.uploads : []
+  if (!items.length) {
+    uploadHistoryList.innerHTML = '<div class="hint">No uploads yet.</div>'
+    return
+  }
+  items.forEach((upload) => {
+    const item = document.createElement('div')
+    item.className = 'list-item'
+    const meta = [
+      upload.type,
+      upload.parsed_count !== null ? `Parsed ${upload.parsed_count}` : null,
+      upload.inserted_count !== null ? `Inserted ${upload.inserted_count}` : null
+    ].filter(Boolean).join(' • ')
+    item.innerHTML = `<strong>${upload.original_filename || upload.report_title || upload.type}</strong>
+      <div class="muted tiny">${new Date(upload.uploaded_at).toLocaleString()} • ${upload.location_name || ''}</div>
+      <div class="muted tiny">${meta}</div>
+      <div class="muted tiny">${upload.detected_start_date || ''} ${upload.detected_end_date ? '→ ' + upload.detected_end_date : ''}</div>`
+    uploadHistoryList.appendChild(item)
   })
 }
 
 async function loadStaff() {
-  if (!state.locationId || state.locationId === 'all') {
-    if (staffList) staffList.innerHTML = '<div class="hint">Select a specific location to view staff.</div>'
+  const role = getEffectiveRoleKey()
+  const locationId = state.locationId || (role === 'admin' ? 'all' : null)
+  if (!locationId) {
+    if (staffList) staffList.innerHTML = '<div class="hint">Select a location to view staff.</div>'
     return
   }
-  const data = await apiFetch(`/staff?locationId=${state.locationId}`)
+  const data = await apiFetch(`/staff?locationId=${locationId}`)
   state.staff = data.staff || []
   populateActivityUserList()
   renderStaffList()
@@ -2235,6 +3270,7 @@ function renderStaffList() {
     item.className = 'list-item'
     item.innerHTML = `<strong>${s.first_name} ${s.last_name}</strong>
       <div class="muted tiny">${s.email} • ${s.phone || 'No phone'}</div>
+      <div class="muted tiny">${s.location_name || ''}</div>
       <div class="muted tiny">${s.permission_level || 'Staff'} • PIN ${s.pin || '—'} • Hire ${s.hire_date || '—'}</div>`
     staffList.appendChild(item)
   })
@@ -2303,18 +3339,39 @@ async function loadIntakes() {
   ;(data.intakes || []).forEach((i) => {
     const item = document.createElement('div')
     item.className = 'list-item'
-    item.innerHTML = `<strong>${i.client_name || 'Unknown'}</strong>
+    const title = i.raw_subject || i.client_name || 'Intake'
+    item.innerHTML = `<strong>${title}</strong>
       <div class="muted tiny">${i.location_name || i.location_name_raw || 'Unassigned'} • ${i.status}</div>
       <div class="muted tiny">${i.contact_email || ''} ${i.contact_phone || ''}</div>`
 
     const statusSelect = document.createElement('select')
-    ;['new','contacted','scheduled','enrolled','closed'].forEach((s) => {
+    ;['new','contacted','scheduled','closed'].forEach((s) => {
       const opt = document.createElement('option')
       opt.value = s
       opt.textContent = s
       if (i.status === s) opt.selected = true
       statusSelect.appendChild(opt)
     })
+
+    const swimmerInput = document.createElement('input')
+    swimmerInput.placeholder = 'Swimmer name'
+    swimmerInput.value = i.swimmer_name || i.client_name || ''
+
+    const guardianInput = document.createElement('input')
+    guardianInput.placeholder = 'Guardian name'
+    guardianInput.value = i.guardian_name || ''
+
+    const emailInput = document.createElement('input')
+    emailInput.placeholder = 'Email'
+    emailInput.value = i.contact_email || ''
+
+    const phoneInput = document.createElement('input')
+    phoneInput.placeholder = 'Phone'
+    phoneInput.value = i.contact_phone || ''
+
+    const startDateInput = document.createElement('input')
+    startDateInput.type = 'date'
+    startDateInput.value = i.requested_start_date ? String(i.requested_start_date).slice(0, 10) : ''
 
     const notes = document.createElement('textarea')
     notes.value = i.notes || ''
@@ -2326,12 +3383,25 @@ async function loadIntakes() {
     saveBtn.addEventListener('click', async () => {
       await apiFetch(`/intakes/${i.id}`, {
         method: 'PATCH',
-        body: JSON.stringify({ status: statusSelect.value, notes: notes.value })
+        body: JSON.stringify({
+          status: statusSelect.value,
+          notes: notes.value,
+          swimmer_name: swimmerInput.value,
+          guardian_name: guardianInput.value,
+          contact_email: emailInput.value,
+          contact_phone: phoneInput.value,
+          requested_start_date: startDateInput.value || null
+        })
       })
       loadIntakes()
     })
 
     item.appendChild(statusSelect)
+    item.appendChild(swimmerInput)
+    item.appendChild(guardianInput)
+    item.appendChild(emailInput)
+    item.appendChild(phoneInput)
+    item.appendChild(startDateInput)
     item.appendChild(notes)
     item.appendChild(saveBtn)
   intakeList.appendChild(item)
@@ -2351,6 +3421,7 @@ function renderLocationAdmin() {
   const locations = Array.isArray(state.locations) ? state.locations : []
   locationAdminList.innerHTML = ''
   locations.forEach((loc) => {
+    if (loc.id === 'all') return
     const item = document.createElement('div')
     item.className = 'list-item'
 
@@ -2398,11 +3469,21 @@ function renderLocationAdmin() {
     item.appendChild(toggles)
 
     item.appendChild(saveBtn)
+    const deleteBtn = document.createElement('button')
+    deleteBtn.className = 'secondary miniBtn'
+    deleteBtn.textContent = 'Deactivate'
+    deleteBtn.addEventListener('click', async () => {
+      if (!confirm(`Deactivate ${loc.name}?`)) return
+      await apiFetch(`/locations/${loc.id}`, { method: 'DELETE' })
+      await loadLocations()
+      renderLocationAdmin()
+    })
+    item.appendChild(deleteBtn)
     locationAdminList.appendChild(item)
   })
 }
 
-loginForm.addEventListener('submit', async (event) => {
+loginForm?.addEventListener('submit', async (event) => {
   event.preventDefault()
   loginError.textContent = ''
   try {
@@ -2421,15 +3502,16 @@ loginForm.addEventListener('submit', async (event) => {
   }
 })
 
-logoutBtn.addEventListener('click', () => {
+logoutBtn?.addEventListener('click', () => {
   setLoggedOut()
 })
 
-locationSelect.addEventListener('change', () => {
+locationSelect?.addEventListener('change', () => {
   state.locationId = locationSelect.value
   if (state.locationId) localStorage.setItem(locationPrefKey, state.locationId)
   state.manualOverride = false
   state.selectedBlock = null
+  state.showAllTimes = false
   if (state.locationId === 'all') {
     state.rosterMode = 'all'
     if (rosterModeSelect) {
@@ -2440,6 +3522,7 @@ locationSelect.addEventListener('change', () => {
     rosterModeSelect.disabled = false
   }
   applyLocationFeatures()
+  applyRoleUi()
   applyInternalTools()
   updateContext()
   renderSavedViews('roster')
@@ -2453,10 +3536,10 @@ locationSelect.addEventListener('change', () => {
     loadDayClosure()
     refreshAlerts()
   }
-  state.reportPreflight = null
-  if (reportConfirm) reportConfirm.checked = false
-  if (reportPreflight) reportPreflight.innerHTML = ''
-  if (reportStatus) reportStatus.textContent = ''
+  if (state.view === 'reports') loadReports()
+  Object.keys(reportPreflightCache).forEach((k) => delete reportPreflightCache[k])
+  if (reportConfirmCheckbox) reportConfirmCheckbox.checked = false
+  if (reportConfirmStatus) reportConfirmStatus.textContent = ''
   state.observationRoster = []
   state.observationSwimmers = []
   if (obsDate) obsDate.value = state.date || ''
@@ -2465,13 +3548,15 @@ locationSelect.addEventListener('change', () => {
   if (obsSwimmerList) obsSwimmerList.innerHTML = ''
 })
 
-dateSelect.addEventListener('change', () => {
+dateSelect?.addEventListener('change', () => {
   state.date = dateSelect.value
   state.manualOverride = false
   state.selectedBlock = null
+  state.showAllTimes = false
   void loadRosterEntries()
   loadDayClosure()
   refreshAlerts()
+  if (state.view === 'reports') loadReports()
 })
 
 rosterModeSelect?.addEventListener('change', () => {
@@ -2519,8 +3604,22 @@ instructorFilter?.addEventListener('change', () => {
   applyFilters()
 })
 
-bulkMarkPresent.addEventListener('click', () => bulkAttendance(1))
-bulkClearAttendance.addEventListener('click', () => bulkAttendance(null))
+timeBlockSelect?.addEventListener('change', () => {
+  const value = timeBlockSelect.value
+  state.manualOverride = true
+  if (value === 'all') {
+    state.showAllTimes = true
+    state.selectedBlock = null
+  } else {
+    state.showAllTimes = false
+    state.selectedBlock = value
+  }
+  buildTimeBlocks()
+  applyFilters()
+})
+
+bulkMarkPresent?.addEventListener('click', () => bulkAttendance(1))
+bulkClearAttendance?.addEventListener('click', () => bulkAttendance(null))
 addSwimmerBtn?.addEventListener('click', openAddSwimmer)
 addSwimmerClose?.addEventListener('click', closeAddSwimmer)
 addSwimmerSave?.addEventListener('click', addLocalSwimmer)
@@ -2528,6 +3627,12 @@ rosterNoteClose?.addEventListener('click', closeRosterNote)
 rosterNoteSave?.addEventListener('click', saveRosterNote)
 rosterNoteClear?.addEventListener('click', clearRosterNote)
 sspPassBtn?.addEventListener('click', markSspPassed)
+sspRevokeBtn?.addEventListener('click', markSspRevoked)
+billingFlagBtn?.addEventListener('click', () => {
+  const entryId = state.noteEntityId || state.rosterNoteEntryId
+  const entry = (state.rosterEntries || []).find((r) => r.id === entryId)
+  if (entry) openBillingFlag(entry)
+})
 rosterNoteModal?.addEventListener('click', (e) => { if (e.target === rosterNoteModal) closeRosterNote() })
 addSwimmerModal?.addEventListener('click', (e) => { if (e.target === addSwimmerModal) closeAddSwimmer() })
 obsFormTab?.addEventListener('click', () => setObsTab('form'))
@@ -2549,7 +3654,7 @@ activityFilter?.addEventListener('change', loadActivityFeed)
 activityFrom?.addEventListener('change', loadActivityFeed)
 activityTo?.addEventListener('change', loadActivityFeed)
 notificationsRefresh?.addEventListener('click', loadNotifications)
-uploadForm?.addEventListener('submit', (e) => { e.preventDefault(); openUploadConfirm() })
+managerNotificationsRefresh?.addEventListener('click', loadNotifications)
 activityClear?.addEventListener('click', () => {
   if (activityFrom) activityFrom.value = ''
   if (activityTo) activityTo.value = ''
@@ -2559,6 +3664,8 @@ activityClear?.addEventListener('click', () => {
   ensureActivityDefaultDates()
   loadActivityFeed()
 })
+billingRefreshBtn?.addEventListener('click', loadBillingTickets)
+billingStatusFilter?.addEventListener('change', loadBillingTickets)
 activityPresetToday?.addEventListener('click', () => {
   const now = new Date()
   if (activityFrom) activityFrom.value = formatDateInputValue(now)
@@ -2592,26 +3699,30 @@ activityUserInput?.addEventListener('change', () => {
 })
 activityFrom?.addEventListener('change', loadActivityFeed)
 activityTo?.addEventListener('change', loadActivityFeed)
-timeBlockToggle?.addEventListener('click', () => {
-  if (!timeBlocks) return
-  timeBlocks.classList.toggle('hidden')
-  if (timeBlockToggle) timeBlockToggle.textContent = timeBlocks.classList.contains('hidden') ? 'All times' : 'Hide times'
-})
-timeActive?.addEventListener('click', () => {
-  if (!timeBlocks) return
-  timeBlocks.classList.toggle('hidden')
-  if (timeBlockToggle) timeBlockToggle.textContent = timeBlocks.classList.contains('hidden') ? 'All times' : 'Hide times'
-})
 
  eodRefresh?.addEventListener('click', () => { refreshAlerts(); loadDayClosure() })
 eodCloseBtn?.addEventListener('click', closeDay)
 eodReopenBtn?.addEventListener('click', reopenDay)
 printRosterBtn?.addEventListener('click', () => triggerPrint('Roster'))
-printRetentionBtn?.addEventListener('click', () => triggerPrint('Retention'))
 printIntakeBtn?.addEventListener('click', () => triggerPrint('Intakes'))
 uploadConfirmBtn?.addEventListener('click', openUploadConfirm)
+document.querySelectorAll('.uploadConfirmTrigger').forEach((btn) => {
+  btn.addEventListener('click', openUploadConfirm)
+})
 uploadConfirmClose?.addEventListener('click', closeUploadConfirm)
 uploadConfirmRun?.addEventListener('click', runUploadConfirm)
+reportConfirmClose?.addEventListener('click', closeReportConfirm)
+reportConfirmRun?.addEventListener('click', runReportConfirm)
+reportConfirmCheckbox?.addEventListener('change', () => {
+  if (reportConfirmRun) reportConfirmRun.disabled = !reportConfirmCheckbox.checked
+})
+reportConfirmModal?.addEventListener('click', (e) => { if (e.target === reportConfirmModal) closeReportConfirm() })
+document.querySelectorAll('[data-report-preflight]').forEach((btn) => {
+  btn.addEventListener('click', () => preflightReportUpload(btn.dataset.reportPreflight))
+})
+document.querySelectorAll('[data-report-upload]').forEach((btn) => {
+  btn.addEventListener('click', () => openReportConfirm(btn.dataset.reportUpload))
+})
 
 classNoteBtn?.addEventListener('click', () => {
   const cls = getSelectedClassInstance()
@@ -2632,6 +3743,10 @@ function getRosterUploadFile() {
   if (uploadRosterFile?.files?.[0]) {
     uploadStatusTarget = uploadStatusUploads
     return uploadRosterFile.files[0]
+  }
+  if (enrollmentRosterFile?.files?.[0]) {
+    uploadStatusTarget = uploadStatusEnrollment
+    return enrollmentRosterFile.files[0]
   }
   return null
 }
@@ -2667,7 +3782,17 @@ async function openUploadConfirm() {
 Classes: ${data.classCount || 0}
 Swimmers: ${data.swimmerCount || 0}
 Date range: ${data.dateStart || ''} to ${data.dateEnd || ''}`
+      if (data.classInserts !== undefined || data.classUpdates !== undefined) {
+        uploadConfirmSummary.textContent += `\nClass inserts: ${data.classInserts || 0} • updates: ${data.classUpdates || 0}`
+      }
+      if (data.swimmerInserts !== undefined || data.swimmerUpdates !== undefined) {
+        uploadConfirmSummary.textContent += `\nSwimmer inserts: ${data.swimmerInserts || 0} • updates: ${data.swimmerUpdates || 0}`
+      }
+      if ((data.classUpdates || 0) > 0 || (data.swimmerUpdates || 0) > 0) {
+        uploadConfirmSummary.textContent += `\nExisting roster detected. Choose Merge or Replace.`
+      }
     }
+    if (uploadMergeMode) uploadMergeMode.value = 'merge'
     if (data.isDuplicate && uploadConfirmSummary) {
       uploadConfirmSummary.textContent += '\nDuplicate detected: this file was already uploaded.'
     }
@@ -2685,13 +3810,15 @@ async function runUploadConfirm() {
   try {
     const formData = new FormData()
     formData.append('file', pendingUploadFile)
-    const data = await apiFetch(`/uploads/roster?locationId=${state.locationId}&date=${state.date}`, {
+    const mode = uploadMergeMode?.value || 'merge'
+    const data = await apiFetch(`/uploads/roster?locationId=${state.locationId}&date=${state.date}&mode=${mode}`, {
       method: 'POST',
       body: formData
     })
     setUploadStatus(`Upload complete. Classes: ${data.classesInserted}, Swimmers: ${data.swimmersInserted}`)
     if (rosterFile) rosterFile.value = ''
     if (uploadRosterFile) uploadRosterFile.value = ''
+    if (enrollmentRosterFile) enrollmentRosterFile.value = ''
     await loadUploads()
     await loadRosterEntries()
     closeUploadConfirm()
@@ -2709,24 +3836,29 @@ function closeUploadConfirm() {
 
 document.querySelectorAll('.navItem').forEach((tab) => {
   tab.addEventListener('click', () => {
-    setView(tab.dataset.view)
+    const view = tab.dataset.view
+    setView(view)
+    if (state.subtabs[view]) setSubtab(view, state.subtabs[view])
+    activateView(view)
     closeNavDrawer()
-    if (tab.dataset.view === 'uploads') loadUploads()
-    if (tab.dataset.view === 'reports') { renderReports(); loadRetentionAnalytics() }
-    if (tab.dataset.view === 'observations') { setObsTab('form'); loadObservationClasses(); renderObservationSwimmers() }
-    if (tab.dataset.view === 'activity') loadActivityFeed()
-    if (tab.dataset.view === 'staff') { loadStaff(); loadInstructorVariants() }
-    if (tab.dataset.view === 'intakes') loadIntakes()
-    if (tab.dataset.view === 'locations') renderLocationAdmin()
-    if (tab.dataset.view === 'notifications') loadNotifications()
+  })
+})
+
+document.querySelectorAll('[data-subtab-btn]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const section = btn.closest('section')
+    if (!section || !section.id || !section.id.startsWith('view')) return
+    const view = section.id.replace('view', '').toLowerCase()
+    setSubtab(view, btn.dataset.subtabBtn)
   })
 })
 
 
-staffSearch.addEventListener('input', renderStaffList)
-refreshVariants.addEventListener('click', loadInstructorVariants)
-intakeStatusFilter.addEventListener('change', loadIntakes)
-gmailConnectBtn.addEventListener('click', async () => {
+staffSearch?.addEventListener('input', renderStaffList)
+contactsSearch?.addEventListener('input', () => { loadContacts() })
+refreshVariants?.addEventListener('click', loadInstructorVariants)
+intakeStatusFilter?.addEventListener('change', loadIntakes)
+gmailConnectBtn?.addEventListener('click', async () => {
   try {
     const data = await apiFetch('/integrations/gmail/auth/start')
     if (data.url) window.location.href = data.url
@@ -2734,12 +3866,43 @@ gmailConnectBtn.addEventListener('click', async () => {
     alert(err?.error || 'Gmail OAuth not configured')
   }
 })
-
-reportPreflightBtn?.addEventListener('click', runReportPreflight)
-reportUploadBtn?.addEventListener('click', uploadReport)
+reportsRefreshBtn?.addEventListener('click', loadReports)
+reportStartDate?.addEventListener('change', loadReports)
+reportEndDate?.addEventListener('change', loadReports)
+reportInstructorFilter?.addEventListener('change', loadReports)
+reportProgramFilter?.addEventListener('change', loadReports)
+hubspotSyncBtn?.addEventListener('click', async () => {
+  try {
+    setReportsStatus('Syncing HubSpot…')
+    await apiFetch('/integrations/hubspot/contacts', { method: 'POST', body: JSON.stringify({ limit: 100 }) })
+    await loadContacts()
+    setReportsStatus('HubSpot sync complete.')
+  } catch (err) {
+    setReportsStatus(err?.error || 'HubSpot sync failed.')
+  }
+})
+homebaseSyncBtn?.addEventListener('click', async () => {
+  if (homebaseSyncStatus) homebaseSyncStatus.textContent = 'Syncing Homebase…'
+  try {
+    await apiFetch('/integrations/homebase/sync', { method: 'POST', body: JSON.stringify({}) })
+    if (homebaseSyncStatus) homebaseSyncStatus.textContent = 'Homebase sync complete.'
+    loadHomebaseSyncStatus()
+  } catch (err) {
+    if (homebaseSyncStatus) homebaseSyncStatus.textContent = err?.error || 'Homebase sync failed.'
+  }
+})
+attendanceExportBtn?.addEventListener('click', exportAttendanceCsv)
+instructorExportBtn?.addEventListener('click', exportInstructorCsv)
+rosterHealthExportBtn?.addEventListener('click', exportRosterHealthCsv)
+sspExportBtn?.addEventListener('click', exportSspCsv)
+enrollmentExportBtn?.addEventListener('click', exportEnrollmentCsv)
+retentionExportBtn?.addEventListener('click', exportRetentionCsv)
+agedAccountsExportBtn?.addEventListener('click', exportAgedAccountsCsv)
+dropListExportBtn?.addEventListener('click', exportDropListCsv)
+contactsExportBtn?.addEventListener('click', exportContactsCsv)
 revBtn?.addEventListener('click', () => { void showRevModal() })
-revClose.addEventListener('click', hideRevModal)
-revModal.addEventListener('click', (e) => { if (e.target === revModal) hideRevModal() })
+revClose?.addEventListener('click', hideRevModal)
+revModal?.addEventListener('click', (e) => { if (e.target === revModal) hideRevModal() })
 userAdminCreate?.addEventListener('click', async () => {
   if (!userAdminFirst || !userAdminLast || !userAdminUsername || !userAdminRole) return
   const locationIds = getSelectedAdminLocations(userAdminLocations)
@@ -2764,11 +3927,40 @@ userAdminCreate?.addEventListener('click', async () => {
     if (userAdminStatus) userAdminStatus.textContent = err?.error || 'Create failed.'
   }
 })
+locationAddBtn?.addEventListener('click', async () => {
+  if (!locationAddName || !locationAddCode) return
+  if (!locationAddName.value || !locationAddCode.value) {
+    if (locationAddStatus) locationAddStatus.textContent = 'Name and code are required.'
+    return
+  }
+  if (locationAddStatus) locationAddStatus.textContent = 'Adding…'
+  try {
+    await apiFetch('/locations', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: locationAddName.value,
+        code: locationAddCode.value,
+        state: locationAddState?.value || null,
+        timezone: locationAddTimezone?.value || null
+      })
+    })
+    locationAddName.value = ''
+    locationAddCode.value = ''
+    if (locationAddState) locationAddState.value = ''
+    if (locationAddTimezone) locationAddTimezone.value = ''
+    if (locationAddStatus) locationAddStatus.textContent = 'Location added.'
+    await loadLocations()
+    renderLocationAdmin()
+  } catch (err) {
+    if (locationAddStatus) locationAddStatus.textContent = err?.error || 'Add failed.'
+  }
+})
 qaRoleSelect?.addEventListener('change', () => {
   const val = qaRoleSelect.value
   if (val) localStorage.setItem(qaRolePrefKey, val)
   else localStorage.removeItem(qaRolePrefKey)
   applyLocationFeatures()
+  applyRoleUi()
   applyInternalTools()
   updateContext()
   renderSavedViews('roster')
@@ -2879,10 +4071,11 @@ async function bootstrap() {
 
   await loadVersion()
   await loadMeta()
-  if (userInfo) userInfo.textContent = state.user ? `${state.user.firstName || ''} ${state.user.lastName || ''} • ${state.user.roleLabel || state.user.roleKey || ''}` : ''
+  if (userInfo) userInfo.textContent = state.user ? `${state.user.firstName || ''} ${state.user.lastName || ''} • ${getEffectiveRoleLabel()}` : ''
   await loadLocations()
   renderUserAdminLocations()
   applyQaControls()
+  applyRoleUi()
   applyInstructorOverride()
   await loadAdminUsers()
   await loadIntegrationStatus()
@@ -2893,12 +4086,21 @@ async function bootstrap() {
   state.date = new Date().toISOString().slice(0, 10)
   if (dateSelect) dateSelect.value = state.date
   updateContext()
+  ensureReportDates()
 
   const roleKey = state.user?.effectiveRoleKey || state.user?.roleKey || ''
   state.rosterMode = roleKey === 'instructor' ? 'mine' : 'all'
   if (rosterModeSelect) rosterModeSelect.value = state.rosterMode
   setRosterMode(state.rosterMode)
-  setView('roster')
+  const route = parseRouteHash()
+  if (route?.view) {
+    setView(route.view, { silent: true })
+    if (route.subtab) setSubtab(route.view, route.subtab, { silent: true })
+  } else {
+    setView('roster', { silent: true })
+  }
+  applySubtab(state.view)
+  activateView(state.view)
 }
 
 applyLayoutMode()

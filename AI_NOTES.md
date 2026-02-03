@@ -1,30 +1,54 @@
 # AquaSuite AI Notes
 
-## DONE and stable
-- Roster uploads: HTML stored to disk and tracked in `roster_uploads`
-- iClassPro condensed roll sheet parsing into `class_instances` + `roster_entries`
-- Announcer-style roster UI in `aquasuite_app/web_v1`
-- Attendance endpoints (`/attendance`, `/attendance/bulk`)
+## System Rules (Do Not Break)
+- Logged-out hard wall: only login UI; no protected fetches.
+- Frontend must use `/api` or `https://api.aqua-suite.app` only.
+- HubSpot is **read-only**: never create/update/merge/push.
+- Roster uploads are daily only; backfill by selecting past date.
 
-## Recently fixed
-- Added `roster_entries` columns for swimmer-based roster UI
-- New parser in `aquasuite-api/src/roster/parseRosterEntries.ts`
-- API endpoints for roster entries + attendance
-- UI updated to match Announcer layout and behavior
+## Permissions Model
+- Roles: admin, manager, aquatics_staff (UI label for instructor).
+- Admin: global access, all reports/uploads/integrations.
+- Manager: location-scoped, reports/uploads/notifications/SSP/billing.
+- Aquatics Staff: roster + notes/attendance only.
 
-## Sharp edges
-- Do NOT ALTER tables manually; use dbmate migrations only
-- `roster_entries` originally existed with legacy columns; keep new columns additive
-- `/uploads/roster` now inserts class + swimmer rows in one transaction
+## Ingest + Truth Rules
+- Attendance truth: Daily roster uploads.
+- Enrollment truth: New Enrollments list.
+- Drop truth: Drop List report.
+- Accounts created truth: ACNE report.
+- Billing AR truth: Aged Accounts report.
+- Instructor performance truth: Instructor Retention report.
+- If sources conflict, create `reconciliations` entry and require manager/admin resolution.
 
-## Future work order
-1) Update migrations in `aquasuite-api/db/migrations`
-2) Run `npm run db:up` (updates `db/schema.sql`)
-3) Update API handlers
-4) Update `aquasuite_app/web_v1` and deploy to `/var/www/aquasuite`
-5) Restart PM2 and run smoke test scripts
+## Reconciliation + Merge Rules
+- `reconciliations` table stores conflicts and manager-selected option.
+- Contacts merge is reversible via `contact_groups` + `contact_group_members`.
+- Duplicate email or phone should prompt merge flow (manager/admin).
 
-## Safe extension notes
-- Roster parsing: edit `parseRosterEntries.ts` and keep date/time parsing in sync with iClassPro output
-- Attendance: keep updates in `roster_entries`; use `attendance_events` only if adding history
-- HubSpot: add new tables and jobs; do not overload roster tables
+## Notifications
+- Channels: `general` and `manager`.
+- Uploads, parsing warnings, conflicts, staff sync, SSP, billing events -> manager channel.
+- Notification reads tracked in `notification_reads`.
+
+## SSP
+- Persistent state via `ssp_events` + roster entries.
+- Pass/revoke creates manager notification + audit.
+
+## Key Tables (new)
+- `staff_location_access`, `notifications`, `notification_reads`, `ssp_events`,
+  `uploads`, `activity_log`, `reconciliations`, `contacts`, `contact_groups`,
+  `contact_group_members`, `billing_tickets`, report snapshots.
+
+## Homebase
+- Sync pulls staff + shifts, upserts AquaSuite `staff` and `staff_location_access`.
+- Missing staff email creates manager notification + reconciliation entry.
+
+## HubSpot
+- Read-only fetch; optional sync into AquaSuite `contacts`.
+- Never write to HubSpot.
+
+## Deploy Notes
+- Always apply dbmate migrations.
+- Update `/opt/aquasuite/aquasuite_app/web_v1` then rsync to `/var/www/aquasuite`.
+- Restart `pm2` for API changes.
