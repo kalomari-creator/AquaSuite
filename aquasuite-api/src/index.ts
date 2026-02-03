@@ -1300,7 +1300,8 @@ app.get('/locations', async (req) => {
   if (effective === 'admin') {
     res = await pool.query(
       `SELECT l.id, l.code, l.name, l.state, l.timezone, l.features,
-              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled
+              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled,
+              l.created_at
        FROM locations l
        WHERE l.is_active = true
        ORDER BY l.name ASC`
@@ -1308,7 +1309,8 @@ app.get('/locations', async (req) => {
   } else {
     res = await pool.query(
       `SELECT l.id, l.code, l.name, l.state, l.timezone, l.features,
-              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled
+              l.email_tag, l.hubspot_tag, l.intake_enabled, l.announcer_enabled,
+              l.created_at
        FROM (
          SELECT location_id, is_default FROM user_locations WHERE user_id=$1
          UNION
@@ -1321,13 +1323,99 @@ app.get('/locations', async (req) => {
     )
   }
 
-  const locations = res.rows.map((loc) => ({
+  const usageRes = await pool.query(
+    `SELECT location_id, SUM(cnt)::int as count
+     FROM (
+       SELECT location_id, COUNT(*) as cnt FROM roster_entries GROUP BY location_id
+       UNION ALL
+       SELECT location_id, COUNT(*) as cnt FROM class_instances GROUP BY location_id
+       UNION ALL
+       SELECT location_id, COUNT(*) as cnt FROM roster_uploads GROUP BY location_id
+       UNION ALL
+       SELECT location_id, COUNT(*) as cnt FROM report_uploads GROUP BY location_id
+       UNION ALL
+       SELECT location_id, COUNT(*) as cnt FROM uploads GROUP BY location_id
+     ) t
+     GROUP BY location_id`
+  )
+  const usageMap = new Map<string, number>()
+  for (const row of usageRes.rows || []) {
+    usageMap.set(row.location_id, Number(row.count) || 0)
+  }
+
+  const locationsRaw = res.rows.map((loc) => ({
     ...loc,
     features: normalizeLocationFeatures(loc)
   }))
 
-  return { locations }
+  const groups = new Map<string, any[]>()
+  for (const loc of locationsRaw) {
+    const name = String(loc.name || '').trim()
+    const state = String(loc.state || '').trim()
+    const groupKey = name.toLowerCase() + '|' + state.toLowerCase()
+    if (!groups.has(groupKey)) groups.set(groupKey, [])
+    groups.get(groupKey)?.push(loc)
+  }
+
+  const deduped: any[] = []
+  for (const [groupKey, group] of groups.entries()) {
+    if (!group || group.length <= 1) {
+      if (group && group[0]) deduped.push(group[0])
+      continue
+    }
+
+    const scored = group.map((loc) => ({
+      loc,
+      score: usageMap.get(loc.id) || 0
+    }))
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score
+      const aTime = new Date(a.loc.created_at || 0).getTime()
+      const bTime = new Date(b.loc.created_at || 0).getTime()
+      return bTime - aTime
+    })
+    const selected = scored[0]?.loc || group[0]
+    deduped.push(selected)
+
+    const existing = await pool.query(
+      `SELECT id FROM reconciliations
+       WHERE entity_type='location' AND entity_key=$1 AND issue_type='duplicate_location'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [groupKey]
+    )
+    if (!existing.rowCount) {
+      const options = group.map((loc) => ({
+        locationId: loc.id,
+        code: loc.code,
+        name: loc.name,
+        state: loc.state,
+        createdAt: loc.created_at,
+        usageScore: usageMap.get(loc.id) || 0
+      }))
+      const recIns = await pool.query(
+        `INSERT INTO reconciliations
+          (location_id, entity_type, entity_key, issue_type, options)
+         VALUES ($1,'location',$2,'duplicate_location',$3)
+         RETURNING id`,
+        [selected?.id || null, groupKey, JSON.stringify({ options })]
+      )
+      const recId = recIns.rows[0]?.id || null
+      await createManagerNotification(
+        selected?.id || null,
+        'duplicate_locations',
+        'Duplicate locations detected for ' + String(group[0].name || '') + ' (' + String(group[0].state || '') + '). Please resolve.',
+        null,
+        { groupKey, options, suggestedLocationId: selected?.id || null },
+        'reconciliation',
+        recId
+      )
+    }
+  }
+
+  return { locations: deduped }
 })
+
 
 app.get('/locations/:id', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
@@ -2734,10 +2822,6 @@ app.post('/uploads/roster', async (req, reply) => {
     filename: file.filename || 'roster.html',
     hash
   })
-
-  const classDates = (parsed.classes || []).map((c: any) => c.classDate).filter(Boolean).sort()
-  const dateStart = classDates[0] || null
-  const dateEnd = classDates[classDates.length - 1] || null
   await pool.query(
     `INSERT INTO uploads
       (type, location_id, uploaded_by_user_id, detected_start_date, detected_end_date, parsed_count, inserted_count, warnings)
