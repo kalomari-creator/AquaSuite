@@ -491,6 +491,27 @@ function getSelectedAdminLocations(container) {
 }
 
 function applyInstructorOverride() {
+
+function renderSavedViews(view) {
+  // Safe no-op fallback if saved views are not implemented yet.
+  try {
+    const key = `aqua_saved_views_${view || ''}`
+    const raw = localStorage.getItem(key)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (view === 'roster' && parsed?.locationId) {
+      state.locationId = parsed.locationId
+      if (locationSelect) locationSelect.value = state.locationId
+    }
+    if (view === 'activity' && parsed?.locationId) {
+      state.locationId = parsed.locationId
+      if (locationSelect) locationSelect.value = state.locationId
+    }
+  } catch {
+    return
+  }
+}
+
   if (!obsInstructorOverride || !obsInstructor) return
   const allowed = canOverrideInstructor()
   obsInstructorOverride.disabled = !allowed
