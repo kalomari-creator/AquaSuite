@@ -64,25 +64,6 @@
           <div class="appTitle">Settings</div>
           <button class="iconBtn" id="gearCloseBtn">✕</button>
         </div>
-        <div class="menuSection">
-          <label class="tiny">Location
-            <select id="locationSelect"></select>
-          </label>
-          <label class="tiny">Date
-            <input id="dateSelect" type="date" class="dateInput" />
-          </label>
-          <div class="row" style="margin-top:6px;">
-            <button class="secondary miniBtn" id="todayBtn" type="button">Today</button>
-          </div>
-        </div>
-        <div class="menuSection">
-          <label class="tiny">Roster Mode
-            <select id="rosterModeSelect">
-              <option value="mine">My Schedule</option>
-              <option value="all">Full Roster</option>
-            </select>
-          </label>
-        </div>
         <div class="menuSection adminOnly" id="adminTools">
           <label class="tiny">View as
             <select id="qaRoleSelect">
@@ -119,6 +100,44 @@
           <button class="tab" data-subtab-btn="main">Roster</button>
         </div>
         <div data-subtab="main">
+<div class="roster-header">
+          <div class="toolbar-row primary">
+            <label class="tiny">Location
+              <select id="locationSelect"></select>
+            </label>
+            <label class="tiny">Date
+              <input id="dateSelect" type="date" class="dateInput" />
+            </label>
+            <button class="secondary miniBtn" id="todayBtn" type="button">Today</button>
+            <label class="tiny">Roster Mode
+              <select id="rosterModeSelect">
+                <option value="mine">My Schedule</option>
+                <option value="all">Full Roster</option>
+              </select>
+            </label>
+            <div class="searchWrap">
+              <input class="searchInput" id="rosterSearch" type="text" placeholder="Search swimmers, instructors..." />
+              <button class="searchClear hidden" id="searchClear" type="button">×</button>
+            </div>
+            <div class="saveStatus" id="rosterSaveStatus"></div>
+          </div>
+          <div class="toolbar-row secondary">
+            <button class="secondary miniBtn" id="filtersToggle" type="button">Filters</button>
+            <label class="tiny">Staff
+              <select id="instructorFilter"></select>
+            </label>
+            <label class="tiny">Sort
+              <select id="sortBy">
+                <option value="instructor">Aquatics Staff</option>
+                <option value="name">Swimmer</option>
+              </select>
+            </label>
+            <button class="secondary miniBtn" id="bulkMarkPresent" type="button">Mark present</button>
+            <button class="secondary miniBtn" id="bulkClearAttendance" type="button">Clear attendance</button>
+            <button class="secondary miniBtn" id="printRosterBtn" type="button">Print</button>
+            <button class="secondary miniBtn" id="classNoteBtn" type="button">Notes/SSP</button>
+          </div>
+        </div>
         <div class="card" id="rosterUploadCard">
           <div class="row">
             <div class="pill">Roster Upload</div>
@@ -149,32 +168,8 @@
         <div class="card">
           <div class="row rosterToolbar">
             <div class="pill">Roster <span id="rosterMeta" class="muted tiny"></span></div>
-            <div class="spacer"></div>
-            <div class="searchWrap">
-              <input class="searchInput" id="rosterSearch" type="text" placeholder="Search swimmers, instructors..." />
-              <button class="searchClear hidden" id="searchClear" type="button">×</button>
-            </div>
-            <button class="secondary miniBtn" id="filtersToggle" type="button">Filters</button>
-            <div class="saveStatus" id="rosterSaveStatus"></div>
           </div>
           <div id="filtersPanel" class="filters-panel open">
-            <label class="tiny">Aquatics Staff
-              <select id="instructorFilter"></select>
-            </label>
-            <label class="tiny">Sort
-              <select id="sortBy">
-                <option value="instructor">Aquatics Staff</option>
-                <option value="name">Swimmer</option>
-              </select>
-            </label>
-            <div class="buttonGroup">
-              <button class="secondary miniBtn" id="bulkMarkPresent" type="button">Mark present</button>
-              <button class="secondary miniBtn" id="bulkClearAttendance" type="button">Clear attendance</button>
-            </div>
-            <div class="buttonGroup">
-              <button class="secondary miniBtn" id="classNoteBtn" type="button">Class note</button>
-              <button class="secondary miniBtn" id="printRosterBtn" type="button">Print</button>
-            </div>
             <div class="buttonGroup">
               <button class="secondary miniBtn" id="rosterSaveViewBtn" type="button">Save view</button>
             </div>

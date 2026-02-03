@@ -71,6 +71,27 @@ function debugWarn(category, ...args) {
   console.warn(`[${timestamp}] [${category}]`, ...args)
 }
 
+function initClickDebug() {
+  const enabled = new URLSearchParams(window.location.search).has('clickdebug')
+    || localStorage.getItem('clickDebug') === '1';
+  if (!enabled) return;
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    const tag = (target?.tagName || '').toLowerCase();
+    if (['button','input','select','textarea','a','label'].includes(tag)) return;
+    const el = document.elementFromPoint(event.clientX, event.clientY);
+    if (!el) return;
+    const style = window.getComputedStyle(el);
+    console.log('[ClickDebug]', {
+      elementFromPoint: el,
+      zIndex: style.zIndex,
+      pointerEvents: style.pointerEvents,
+      position: style.position
+    });
+  }, true);
+}
+
+
 // Safe element getter with debug logging
 function safeEl(id) {
   const element = document.getElementById(id)
@@ -744,6 +765,22 @@ async function loadHomebaseSyncStatus() {
 }
 
 async function loadHomebaseShiftStatus() {
+  if (!homebaseShiftStatus) return
+  if (!state.locationId || state.locationId === 'all') {
+    homebaseShiftStatus.textContent = 'On shift: —'
+    return
+  }
+  try {
+    const data = await apiFetch(`/integrations/homebase/on-shift?locationId=${state.locationId}`)
+    if (data.enabled === false) {
+      homebaseShiftStatus.textContent = 'On shift: Homebase disabled'
+      return
+    }
+    homebaseShiftStatus.textContent = `On shift: ${data.count || 0}`
+  } catch {
+    homebaseShiftStatus.textContent = 'On shift: unavailable'
+  }
+}
 
 async function loadNotifications() {
   const isAdmin = getEffectiveRoleKey() === 'admin'
@@ -793,24 +830,7 @@ async function loadNotifications() {
   }
 }
   if (!homebaseShiftStatus) return
-  if (!state.locationId || state.locationId === 'all') {
-    homebaseShiftStatus.textContent = 'On shift: —'
-    return
-  }
-  try {
-    const data = await apiFetch(`/integrations/homebase/on-shift?locationId=${state.locationId}`)
-    if (data.enabled === false) {
-      homebaseShiftStatus.textContent = 'On shift: Homebase disabled'
-      return
-    }
-    homebaseShiftStatus.textContent = `On shift: ${data.count || 0}`
-  } catch {
-    homebaseShiftStatus.textContent = 'On shift: unavailable'
-  }
-}
-
-async function showRevModal() {
-  if (!revModal || !revContent) return
+  if (!svModal || !revContent) return
   revContent.innerHTML = '<div class="hint">Loading revision history…</div>'
   revModal.classList.remove('hidden')
   revModal.style.pointerEvents = 'auto'
@@ -1216,6 +1236,16 @@ function applyRouteFromHash() {
 function openNavDrawer() {
   if (!navDrawer || !navOverlay) return
   closeGearMenu()
+  const topbar = document.querySelector('.topbar')
+  if (topbar) {
+    const rect = topbar.getBoundingClientRect()
+    navOverlay.style.top = `${rect.bottom}px`
+    navOverlay.style.height = `calc(100% - ${rect.bottom}px)`
+  } else {
+    navOverlay.style.top = '0'
+    navOverlay.style.height = '100%'
+  }
+  navOverlay.style.pointerEvents = 'auto'
   navDrawer.classList.remove('hidden')
   navOverlay.classList.remove('hidden')
 }
@@ -1224,6 +1254,9 @@ function closeNavDrawer() {
   if (!navDrawer || !navOverlay) return
   navDrawer.classList.add('hidden')
   navOverlay.classList.add('hidden')
+  navOverlay.style.pointerEvents = 'none'
+  navOverlay.style.top = ''
+  navOverlay.style.height = ''
 }
 
 function openGearMenu() {

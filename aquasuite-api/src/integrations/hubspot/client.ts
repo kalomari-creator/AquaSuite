@@ -68,3 +68,33 @@ export async function searchHubspotContactByEmail(email: string) {
 export function hubspotConfigured() {
   return configured()
 }
+
+
+export async function upsertHubspotContact(payload: {
+  email?: string
+  phone?: string
+  properties?: Record<string, any>
+}) {
+  if (!configured()) return null
+  const properties = payload.properties || {}
+  if (payload.email) properties.email = payload.email
+  if (payload.phone) properties.phone = payload.phone
+
+  let existing: any = null
+  if (payload.email) existing = await searchContactBy('email', payload.email)
+  if (!existing && payload.phone) existing = await searchContactBy('phone', payload.phone)
+
+  if (existing?.id) {
+    await hubspotFetch(`/crm/v3/objects/contacts/${existing.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ properties })
+    })
+    return { id: existing.id, updated: true }
+  }
+
+  const created = await hubspotFetch('/crm/v3/objects/contacts', {
+    method: 'POST',
+    body: JSON.stringify({ properties })
+  })
+  return { id: created?.id || null, created: true }
+}

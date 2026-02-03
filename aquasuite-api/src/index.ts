@@ -345,7 +345,7 @@ async function upsertContactFromLead(locationId: string | null, source: string, 
            phone=COALESCE($3, phone),
            source=COALESCE($4, source),
            updated_at=now()
-       WHERE id=$5`,
+       WHERE id=$12`,
       [fullName, email, phone, source, current.id]
     )
     return current.id
@@ -1546,7 +1546,7 @@ app.patch('/locations/:id', async (req, reply) => {
            WHEN $4 IS NULL THEN features
            ELSE jsonb_set(COALESCE(features, {}::jsonb), {announcer_enabled}, to_jsonb($4), true)
          END
-     WHERE id=$5`,
+     WHERE id=$12`,
     [
       body.email_tag ?? null,
       body.hubspot_tag ?? null,
@@ -2762,6 +2762,9 @@ app.post('/uploads/roster/preflight', async (req, reply) => {
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
+
   if (locationId === 'all') {
     const isAdmin = await requireAdmin(sess.user_id)
     if (!isAdmin) return reply.code(403).send({ error: 'admin_required' })
@@ -2870,6 +2873,9 @@ app.post('/uploads/roster', async (req, reply) => {
   const locationId = (req.query as any)?.locationId as string | undefined
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -3135,6 +3141,9 @@ app.get('/class-instances', async (req, reply) => {
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
+
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
 
@@ -3165,6 +3174,9 @@ app.get('/class-instances/mine', async (req, reply) => {
   const locationId = (req.query as any)?.locationId as string | undefined
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -3593,6 +3605,78 @@ app.get('/staff', async (req, reply) => {
   return { staff: res.rows, staffDirectory: directoryRes.rows }
 })
 
+app.patch('/staff/:id', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const staffId = (req.params as any)?.id as string
+  const body = req.body as {
+    first_name?: string
+    last_name?: string
+    email?: string
+    phone?: string | null
+    birthday?: string | null
+    location_id?: string
+    permission_level?: string | null
+    pin?: string | null
+    hire_date?: string | null
+    is_active?: boolean
+  }
+
+  if (!body.location_id) return reply.code(400).send({ error: 'location_id_required' })
+
+  const isAdmin = await requireAdmin(sess.user_id)
+  if (!isAdmin) {
+    const hasAccess = await requireLocationAccess(sess.user_id, body.location_id)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  await pool.query(
+    `UPDATE staff
+     SET first_name=COALESCE($1, first_name),
+         last_name=COALESCE($2, last_name),
+         email=COALESCE($3, email),
+         phone=$4,
+         birthday=$5
+     WHERE id=$6`,
+    [
+      body.first_name ?? null,
+      body.last_name ?? null,
+      body.email ?? null,
+      body.phone ?? null,
+      body.birthday ?? null,
+      staffId
+    ]
+  )
+
+  await pool.query(
+    `INSERT INTO staff_locations (staff_id, location_id, permission_level, pin, hire_date, is_active)
+     VALUES ($1,$2,$3,$4,$5,$6)
+     ON CONFLICT (staff_id, location_id)
+     DO UPDATE SET permission_level=EXCLUDED.permission_level,
+                  pin=EXCLUDED.pin,
+                  hire_date=EXCLUDED.hire_date,
+                  is_active=EXCLUDED.is_active`,
+    [
+      staffId,
+      body.location_id,
+      body.permission_level ?? null,
+      body.pin ?? null,
+      body.hire_date ?? null,
+      body.is_active ?? true
+    ]
+  )
+
+  await logAuditEvent(body.location_id, sess.user_id, 'staff_updated', 'staff', staffId, {
+    permission_level: body.permission_level ?? null,
+    is_active: body.is_active ?? true
+  })
+
+  return reply.send({ ok: true })
+})
+
+
 app.get('/instructor-variants', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
   const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
@@ -3630,6 +3714,9 @@ app.get('/instructor-aliases', async (req, reply) => {
   const locationId = (req.query as any)?.locationId as string | undefined
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
@@ -3983,6 +4070,71 @@ app.get('/intakes', async (req, reply) => {
   return { intakes: res.rows }
 })
 
+app.get('/intakes/:id/activity', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const intakeId = (req.params as any)?.id as string
+  const intake = await pool.query(`SELECT location_id FROM client_intakes WHERE id=$1`, [intakeId])
+  if (!intake.rowCount) return reply.code(404).send({ error: 'intake_not_found' })
+  const locationId = intake.rows[0].location_id
+  if (locationId) {
+    const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  const res = await pool.query(
+    `SELECT a.id, a.action_type, a.payload, a.created_at,
+            s.first_name, s.last_name
+     FROM client_intake_activity a
+     LEFT JOIN staff s ON s.id = a.staff_id
+     WHERE a.intake_id=$1
+     ORDER BY a.created_at DESC
+     LIMIT 200`,
+    [intakeId]
+  )
+  return reply.send({ activity: res.rows })
+})
+
+
+
+
+app.get('/intakes/activity', async (req, reply) => {
+  const sess = (req as any).session as { user_id: string }
+  const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
+  if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
+
+  const locationId = (req.query as any)?.locationId as string | undefined
+  if (locationId) {
+    const hasAccess = await requireLocationAccess(sess.user_id, locationId)
+    if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
+  }
+
+  const params: any[] = []
+  let where = ''
+  if (locationId) {
+    params.push(locationId)
+    where = `WHERE ci.location_id=$1`
+  }
+
+  const res = await pool.query(
+    `SELECT a.id, a.action_type, a.payload, a.created_at,
+            ci.client_name, ci.raw_subject, ci.status, ci.location_id,
+            l.name as location_name,
+            s.first_name, s.last_name
+     FROM client_intake_activity a
+     JOIN client_intakes ci ON ci.id = a.intake_id
+     LEFT JOIN locations l ON l.id = ci.location_id
+     LEFT JOIN staff s ON s.id = a.staff_id
+     ${where}
+     ORDER BY a.created_at DESC
+     LIMIT 200`,
+    params
+  )
+
+  return reply.send({ activity: res.rows })
+})
 app.patch('/intakes/:id', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
   const roleOk = await requireAnyRole(sess.user_id, ['admin','manager'])
@@ -4024,7 +4176,7 @@ app.patch('/intakes/:id', async (req, reply) => {
          contact_phone=COALESCE($9, contact_phone),
          source_detail=COALESCE($10, source_detail),
          location_id=COALESCE($11, location_id)
-     WHERE id=$5`,
+     WHERE id=$12`,
     [
       body.status ?? null,
       body.owner_staff_id ?? null,
@@ -4039,6 +4191,13 @@ app.patch('/intakes/:id', async (req, reply) => {
       body.location_id ?? null,
       intakeId
     ]
+  )
+
+
+  await pool.query(
+    `INSERT INTO client_intake_activity (intake_id, staff_id, action_type, payload)
+     VALUES ($1,$2,$3,$4)`,
+    [intakeId, sess.user_id, 'updated', body ? JSON.stringify(body) : null]
   )
   return { ok: true }
 })
@@ -4377,43 +4536,49 @@ app.post('/integrations/hubspot/contacts', async (req, reply) => {
   const body = req.body as { limit?: number }
   const limit = Math.min(200, Number(body?.limit || 100))
 
-  const data: any = await fetchHubspotContacts(limit)
-  const results = Array.isArray(data?.results) ? data.results : []
-  let inserted = 0
-  let updated = 0
+  try {
+    const data: any = await fetchHubspotContacts(limit)
+    const results = Array.isArray(data?.results) ? data.results : []
+    let inserted = 0
+    let updated = 0
 
-  for (const item of results) {
-    const props = item.properties || {}
-    const email = props.email || null
-    const phone = props.phone || null
-    const fullName = `${props.firstname || ''} ${props.lastname || ''}`.trim() || null
+    for (const item of results) {
+      const props = item.properties || {}
+      const email = props.email || null
+      const phone = props.phone || null
+      const fullName = `${props.firstname || ''} ${props.lastname || ''}`.trim() || null
 
-    if (!email && !phone) continue
+      if (!email && !phone) continue
 
-    const existing = await pool.query(
-      `SELECT id FROM contacts WHERE (email IS NOT NULL AND lower(email)=lower($1)) OR (phone IS NOT NULL AND phone=$2) LIMIT 1`,
-      [email, phone]
-    )
-    if (existing.rowCount) {
-      await pool.query(
-        `UPDATE contacts SET full_name=COALESCE($1, full_name), phone=COALESCE($2, phone), updated_at=now()
-         WHERE id=$3`,
-        [fullName, phone, existing.rows[0].id]
+      const existing = await pool.query(
+        `SELECT id FROM contacts WHERE (email IS NOT NULL AND lower(email)=lower($1)) OR (phone IS NOT NULL AND phone=$2) LIMIT 1`,
+        [email, phone]
       )
-      updated += 1
-    } else {
-      await pool.query(
-        `INSERT INTO contacts (location_id, source, full_name, email, phone)
-         VALUES (NULL, 'hubspot', $1, $2, $3)`,
-        [fullName, email, phone]
-      )
-      inserted += 1
+      if (existing.rowCount) {
+        await pool.query(
+          `UPDATE contacts SET full_name=COALESCE($1, full_name), phone=COALESCE($2, phone), updated_at=now()
+           WHERE id=$3`,
+          [fullName, phone, existing.rows[0].id]
+        )
+        updated += 1
+      } else {
+        await pool.query(
+          `INSERT INTO contacts (location_id, source, full_name, email, phone)
+           VALUES (NULL, 'hubspot', $1, $2, $3)`,
+          [fullName, email, phone]
+        )
+        inserted += 1
+      }
     }
-  }
 
-  await upsertIntegrationStatus('hubspot', null, { lastSyncedAt: new Date(), lastSuccessAt: new Date(), lastError: null, meta: { fetched: results.length } })
-  await createManagerNotification(null, 'hubspot_sync', `HubSpot contacts synced (${inserted} new, ${updated} updated)`, sess.user_id, { fetched: results.length })
-  return reply.send({ ok: true, fetched: results.length, inserted, updated })
+    await upsertIntegrationStatus('hubspot', null, { lastSyncedAt: new Date(), lastSuccessAt: new Date(), lastError: null, meta: { fetched: results.length } })
+    await createManagerNotification(null, 'hubspot_sync', `HubSpot contacts synced (${inserted} new, ${updated} updated)`, sess.user_id, { fetched: results.length })
+    return reply.send({ ok: true, fetched: results.length, inserted, updated })
+  } catch (err: any) {
+    const message = String(err?.message || err)
+    await upsertIntegrationStatus('hubspot', null, { lastSyncedAt: new Date(), lastError: message })
+    return reply.code(500).send({ error: 'hubspot_sync_failed', message })
+  }
 })
 
 app.get('/billing/tickets', async (req, reply) => {
@@ -4591,6 +4756,9 @@ app.get('/roster/day', async (req, reply) => {
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
 
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
+
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
 
@@ -4621,6 +4789,9 @@ app.get('/roster/my', async (req, reply) => {
   const locationId = (req.query as any)?.locationId as string | undefined
   const date = (req.query as any)?.date as string | undefined
   if (!locationId || !date) return reply.code(400).send({ error: 'locationId_and_date_required' })
+
+  const modeRaw = (req.query as any)?.mode as string | undefined
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
   if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })

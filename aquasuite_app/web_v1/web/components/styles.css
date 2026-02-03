@@ -122,7 +122,7 @@ button.primary{ background: var(--accent); border-color: var(--accent); color: #
 button.primary:hover{ background: #0284c7; border-color: #0284c7; }
 button.secondary{ border-color: rgba(148,163,184,.6); }
 button.secondary:hover{ border-color: var(--accent); }
-button.miniBtn{ padding:6px 10px; font-size:12px; min-height:34px; border-radius:10px; }
+button.miniBtn{ padding:4px 10px; font-size:12px; min-height:30px; border-radius:10px; }
 button.tab{ padding:9px 12px; border-radius:999px; background: transparent; border-color: transparent; color:#334155; }
 button.tab.active{ background: var(--accent-soft); border-color: rgba(16,185,129,.2); outline: 2px solid rgba(16,185,129,.15); color:#065f46; }
 button.danger{ background: #FEE2E2; border-color: #FECACA; color: #DC2626; }
@@ -601,3 +601,32 @@ select.compact, input.compact{ padding: 6px 10px; font-size: 13px; border-radius
   --chart-amber: #F59E0B;
   --chart-purple: #A855F7;
 }
+
+.roster-header{
+  background: var(--cardA);
+  border:1px solid var(--line);
+  border-radius:18px;
+  padding:10px 12px;
+  margin-top:12px;
+  box-shadow: 0 8px 18px rgba(15,23,42,.06);
+}
+.toolbar-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  flex-wrap:wrap;
+}
+.toolbar-row.primary{ margin-bottom:8px; }
+.toolbar-row label{ display:flex; flex-direction:column; gap:4px; }
+.toolbar-row .searchWrap{ margin-left:auto; }
+.toolbar-row .saveStatus{ min-width:140px; text-align:right; }
+@media (min-width: 1100px){
+  .toolbar-row{
+    flex-wrap:nowrap;
+    overflow-x:auto;
+  }
+  .toolbar-row label, .toolbar-row button, .toolbar-row .searchWrap{ flex-shrink:0; }
+}
+.roster-table{ table-layout: fixed; }
+.roster-table th, .roster-table td{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.roster-table thead th{ position: sticky; top: 0; z-index: 2; background: var(--surface-strong); }
