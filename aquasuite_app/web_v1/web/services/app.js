@@ -491,6 +491,12 @@ function getSelectedAdminLocations(container) {
 }
 
 function applyInstructorOverride() {
+  if (!obsInstructorOverride || !obsInstructor) return
+  const allowed = canOverrideInstructor()
+  obsInstructorOverride.disabled = !allowed
+  if (!allowed) obsInstructorOverride.checked = false
+  obsInstructor.disabled = !obsInstructorOverride.checked
+}
 
 function renderSavedViews(view) {
   // Safe no-op fallback if saved views are not implemented yet.
@@ -510,13 +516,6 @@ function renderSavedViews(view) {
   } catch {
     return
   }
-}
-
-  if (!obsInstructorOverride || !obsInstructor) return
-  const allowed = canOverrideInstructor()
-  obsInstructorOverride.disabled = !allowed
-  if (!allowed) obsInstructorOverride.checked = false
-  obsInstructor.disabled = !obsInstructorOverride.checked
 }
 
 let obsAutoLoadTimer
@@ -676,6 +675,54 @@ async function loadHomebaseSyncStatus() {
 }
 
 async function loadHomebaseShiftStatus() {
+
+async function loadNotifications() {
+  const isAdmin = getEffectiveRoleKey() === 'admin'
+  const locationId = state.locationId || (isAdmin ? 'all' : null)
+  if ((!notificationList && !managerNotificationList) || !locationId) return
+
+  const renderList = (el, items) => {
+    if (!el) return
+    el.innerHTML = ''
+    if (!items || !items.length) {
+      el.innerHTML = '<div class="hint">No notifications yet.</div>'
+      return
+    }
+    items.forEach((n) => {
+      const item = document.createElement('div')
+      item.className = 'list-item'
+      const time = n.created_at ? new Date(n.created_at).toLocaleString() : ''
+      item.innerHTML = `<strong>${n.title || n.type || 'Notification'}</strong>
+        <div class="muted tiny">${time}</div>
+        <div class="muted">${n.body || ''}</div>`
+      if (!n.read_at) item.classList.add('unread')
+      item.addEventListener('click', async () => {
+        if (n.read_at) return
+        try {
+          await apiFetch('/notifications/read', { method: 'POST', body: JSON.stringify({ notificationId: n.id }) })
+          item.classList.remove('unread')
+          n.read_at = new Date().toISOString()
+        } catch {}
+      })
+      el.appendChild(item)
+    })
+  }
+
+  try {
+    if (notificationList) notificationList.innerHTML = '<div class="hint">Loading…</div>'
+    if (managerNotificationList) managerNotificationList.innerHTML = '<div class="hint">Loading…</div>'
+    const general = await apiFetch(`/notifications?locationId=${locationId}&channel=general`)
+    renderList(notificationList, general.notifications || [])
+    if (getEffectiveRoleKey() === 'admin' || getEffectiveRoleKey() === 'manager') {
+      const manager = await apiFetch(`/notifications?locationId=${locationId}&channel=manager`)
+      renderList(managerNotificationList, manager.notifications || [])
+    }
+  } catch (err) {
+    const msg = err?.error || 'Failed to load notifications.'
+    if (notificationList) notificationList.innerHTML = `<div class="hint">${msg}</div>`
+    if (managerNotificationList) managerNotificationList.innerHTML = `<div class="hint">${msg}</div>`
+  }
+}
   if (!homebaseShiftStatus) return
   if (!state.locationId || state.locationId === 'all') {
     homebaseShiftStatus.textContent = 'On shift: —'
