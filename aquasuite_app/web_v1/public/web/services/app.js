@@ -3897,6 +3897,7 @@ classNoteBtn?.addEventListener('click', () => {
 
 let pendingUploadFile = null
 let pendingUploadHash = null
+let pendingUploadIsDuplicate = false
 let uploadStatusTarget = null
 
 function getRosterUploadFile() {
@@ -3918,6 +3919,16 @@ function getRosterUploadFile() {
 
 function setUploadStatus(textValue) {
   if (uploadStatusTarget) uploadStatusTarget.textContent = textValue || ''
+}
+
+function syncUploadConfirmState() {
+  if (!uploadConfirmRun) return
+  const mode = uploadMergeMode?.value || merge
+  if (pendingUploadIsDuplicate && mode !== replace) {
+    uploadConfirmRun.disabled = true
+    return
+  }
+  uploadConfirmRun.disabled = false
 }
 
 async function openUploadConfirm() {
@@ -3942,6 +3953,7 @@ async function openUploadConfirm() {
       body: formData
     })
     pendingUploadHash = data.hash
+    pendingUploadIsDuplicate = !!data.isDuplicate
     if (uploadConfirmSummary) {
       uploadConfirmSummary.textContent = `Location: ${data.locationName || ''}
 Classes: ${data.classCount || 0}
@@ -3961,7 +3973,7 @@ Date range: ${data.dateStart || ''} to ${data.dateEnd || ''}`
     if (data.isDuplicate && uploadConfirmSummary) {
       uploadConfirmSummary.textContent += '\nDuplicate detected: this file was already uploaded.'
     }
-    if (uploadConfirmRun) uploadConfirmRun.disabled = !!data.isDuplicate
+    syncUploadConfirmState()
     uploadConfirmModal.classList.remove('hidden')
     uploadConfirmModal.style.pointerEvents = 'auto'
   } catch (err) {
