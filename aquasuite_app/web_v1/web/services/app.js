@@ -54,6 +54,32 @@ const state = {
 const el = (id) => document.getElementById(id)
 const API_BASE = '/api'
 const PRIVATE_HOST_REGEX = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/
+
+// DEBUG_UI mode for development - enable via localStorage or URL param
+const DEBUG_UI = localStorage.getItem('DEBUG_UI') === '1' ||
+  new URLSearchParams(window.location.search).get('DEBUG_UI') === '1'
+
+function debugLog(category, ...args) {
+  if (!DEBUG_UI) return
+  const timestamp = new Date().toISOString().slice(11, 23)
+  console.log(`[${timestamp}] [${category}]`, ...args)
+}
+
+function debugWarn(category, ...args) {
+  if (!DEBUG_UI) return
+  const timestamp = new Date().toISOString().slice(11, 23)
+  console.warn(`[${timestamp}] [${category}]`, ...args)
+}
+
+// Safe element getter with debug logging
+function safeEl(id) {
+  const element = document.getElementById(id)
+  if (!element && DEBUG_UI) {
+    debugWarn('DOM', `Element #${id} not found`)
+  }
+  return element
+}
+
 function assertSafeEnvironment() {
   if (API_BASE.startsWith('http')) {
     const baseHost = new URL(API_BASE).hostname || ''
@@ -1072,6 +1098,7 @@ async function markSspRevoked() {
 }
 
 function setView(view, options = {}) {
+  debugLog('VIEW', `setView("${view}")`, options)
   state.view = view
   if (view === 'roster' && state.locationId === 'all') {
     const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
@@ -1401,11 +1428,17 @@ async function checkAutoAdvance() {
 setInterval(checkAutoAdvance, 60000)
 
 async function loadRosterEntries() {
+  debugLog('ROSTER', 'loadRosterEntries called, view:', state.view)
+  // Guard: Only run roster loading when roster view elements exist
+  if (state.view !== 'roster' && state.view !== 'reports') {
+    debugLog('ROSTER', 'Skipping - not on roster/reports view')
+    return
+  }
+
   if (!state.locationId || !state.date || state.locationId === 'all') {
     state.rosterEntries = []
     state.filteredEntries = []
-    if (rosterTable) if (!rosterTable) return
-  rosterTable.innerHTML = ''
+    if (rosterTable) rosterTable.innerHTML = ''
     if (rosterEmpty) {
       rosterEmpty.textContent = state.locationId === 'all'
         ? 'Select a specific location to load roster.'
@@ -1463,6 +1496,14 @@ function updateClassNoteButton() {
 }
 
 function buildTimeBlocks() {
+  // Guard: Only build time blocks when on roster view and elements exist
+  if (state.view !== 'roster') {
+    return
+  }
+  if (!timeActive && !timeBlocks && !timeBlockSelect) {
+    return
+  }
+
   if (state.locationId === 'all') {
     if (timeActive) timeActive.textContent = 'Global view: time blocks disabled.'
     if (timeBlocks) timeBlocks.classList.add('hidden')
@@ -4160,8 +4201,10 @@ changePinSave?.addEventListener('click', async () => {
 })
 
 async function bootstrap() {
+  debugLog('BOOT', 'Starting bootstrap...')
   assertSafeEnvironment()
   setLoggedIn()
+  debugLog('BOOT', 'User logged in, loading data...')
 
   await loadVersion()
   updateFooterVersion()
@@ -4196,9 +4239,11 @@ async function bootstrap() {
   }
   applySubtab(state.view)
   activateView(state.view)
+  debugLog('BOOT', 'Bootstrap complete, view:', state.view)
 }
 
 applyLayoutMode()
+debugLog('INIT', 'Layout mode applied:', localStorage.getItem('layoutMode') || 'auto')
 
 try {
   assertSafeEnvironment()
