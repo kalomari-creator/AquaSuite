@@ -16,6 +16,7 @@ import { hasIntegration, listLocationUuids, maskUuid, validateEnv, getDefaultLoc
 import { normalizeName } from './utils/normalizeName.js'
 import { preflightReport } from './services/reportPreflight.js'
 import { extractInstructorRetention, extractAgedAccounts, extractDropList, extractEnrollmentEvents, extractAcneLeads, parseUsDate } from './utils/reportParsing.js'
+import { dedupeWorkQueue } from './utils/dedupe.js'
 import { normalizeLocationFeatures } from './services/locationFeatures.js'
 import { getGmailAuthUrl, exchangeGmailCode } from './integrations/gmail/oauth.js'
 import { fetchHomebaseEmployees, fetchHomebaseShifts } from './integrations/homebase/client.js'
@@ -2718,11 +2719,20 @@ app.get('/reports/retention', async (req, reply) => {
   if (!snapshotIds.length) return reply.send({ rows: [] })
 
   const rows = await pool.query(
-    `SELECT rs.report_date::text as report_date, rr.instructor_name, rr.booked, rr.retained, rr.percent_this_cycle, rr.percent_change
+    `SELECT rs.location_id,
+            l.name as location_name,
+            rs.report_date::text as report_date,
+            MIN(rr.instructor_name) as instructor_name,
+            MAX(rr.booked)::int as booked,
+            MAX(rr.retained)::int as retained,
+            MAX(rr.percent_this_cycle) as percent_this_cycle,
+            MAX(rr.percent_change) as percent_change
      FROM retention_snapshots rs
      JOIN retention_rows rr ON rr.snapshot_id=rs.id
+     LEFT JOIN locations l ON l.id=rs.location_id
      WHERE rs.id = ANY($1::uuid[])
-     ORDER BY rs.report_date DESC, rr.instructor_name`,
+     GROUP BY rs.id, rs.location_id, l.name, rs.report_date, lower(rr.instructor_name)
+     ORDER BY rs.report_date DESC, l.name, lower(rr.instructor_name)`,
     [snapshotIds]
   )
 
@@ -2775,11 +2785,18 @@ app.get('/reports/aged-accounts', async (req, reply) => {
   if (!snapshotIds.length) return reply.send({ rows: [] })
 
   const rows = await pool.query(
-    `SELECT a.report_date::text as report_date, r.bucket, r.amount, r.total
+    `SELECT a.location_id,
+            l.name as location_name,
+            a.report_date::text as report_date,
+            MIN(r.bucket) as bucket,
+            MAX(r.amount) as amount,
+            MAX(r.total) as total
      FROM aged_accounts_snapshots a
      JOIN aged_accounts_rows r ON r.snapshot_id=a.id
+     LEFT JOIN locations l ON l.id=a.location_id
      WHERE a.id = ANY($1::uuid[])
-     ORDER BY a.report_date DESC, r.bucket`,
+     GROUP BY a.id, a.location_id, l.name, a.report_date, lower(r.bucket)
+     ORDER BY a.report_date DESC, l.name, lower(r.bucket)`,
     [snapshotIds]
   )
   return reply.send({ rows: rows.rows })
@@ -2806,21 +2823,27 @@ app.get('/reports/drop-list', async (req, reply) => {
   }
 
   const params: any[] = locationId === 'all' ? [] : [locationId]
-  let where = locationId === 'all' ? `WHERE 1=1` : `WHERE location_id=$1`
+  let where = locationId === 'all' ? `WHERE 1=1` : `WHERE d.location_id=$1`
   if (start) {
     params.push(start)
-    where += ` AND drop_date >= $${params.length}`
+    where += ` AND d.drop_date >= $${params.length}`
   }
   if (end) {
     params.push(end)
-    where += ` AND drop_date <= $${params.length}`
+    where += ` AND d.drop_date <= $${params.length}`
   }
 
   const rows = await pool.query(
-    `SELECT id, drop_date::text as drop_date, swimmer_name, reason
-     FROM drop_events
+    `SELECT d.id,
+            d.location_id,
+            l.name as location_name,
+            d.drop_date::text as drop_date,
+            d.swimmer_name,
+            d.reason
+     FROM drop_events d
+     LEFT JOIN locations l ON l.id=d.location_id
      ${where}
-     ORDER BY drop_date DESC
+     ORDER BY d.drop_date DESC
      LIMIT 300`,
     params
   )
@@ -2936,11 +2959,11 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
   }
 
   const byStaffRes = await pool.query(
-    `SELECT COALESCE(actual_instructor, scheduled_instructor, instructor_name, 'Unassigned') as instructor,
+    `SELECT MIN(COALESCE(actual_instructor, scheduled_instructor, instructor_name, 'Unassigned')) as instructor,
             COUNT(*)::int as count
      FROM roster_entries
      ${rosterWhere} AND flag_first_time=true
-     GROUP BY instructor
+     GROUP BY lower(COALESCE(actual_instructor, scheduled_instructor, instructor_name, 'Unassigned'))
      ORDER BY count DESC`,
     rosterParams
   )
@@ -2960,17 +2983,7 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
      LIMIT 200`,
     leadParams
   )
-  const workQueue: any[] = []
-  const seenQueue = new Set<string>()
-  leadsRaw.rows.forEach((row) => {
-    const keyName = String(row.full_name || '').toLowerCase()
-    const keyEmail = String(row.email || '').toLowerCase()
-    const keyPhone = String(row.phone || '').replace(/\D/g, '')
-    const dedupeKey = `${keyName}|${keyEmail}|${keyPhone}`
-    if (!keyName || enrolledNames.has(keyName) || seenQueue.has(dedupeKey)) return
-    seenQueue.add(dedupeKey)
-    workQueue.push(row)
-  })
+  const workQueue = dedupeWorkQueue(leadsRaw.rows, enrolledNames)
 
   return reply.send({
     enrollments: enrollments.rows,

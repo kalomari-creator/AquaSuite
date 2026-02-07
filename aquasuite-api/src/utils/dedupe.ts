@@ -1,15 +1,37 @@
 export type LeadRow = { full_name?: string | null; email?: string | null; phone?: string | null }
 export type WorkQueueRow = LeadRow & { lead_date?: string | null }
 
+function normalizeEmail(value?: string | null) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizePhone(value?: string | null) {
+  return String(value || '').replace(/\D/g, '')
+}
+
+function normalizeName(value?: string | null) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function buildWorkQueueIdentityKey(row: WorkQueueRow) {
+  // Prefer a stable contact identity key. This prevents "duplicate-looking" queue entries when
+  // names vary but email/phone is the same.
+  const phone = normalizePhone(row.phone)
+  if (phone) return `p:${phone}`
+  const email = normalizeEmail(row.email)
+  if (email) return `e:${email}`
+  const name = normalizeName(row.full_name)
+  const date = String(row.lead_date || '').slice(0, 10)
+  return `n:${name}|d:${date}`
+}
+
 export function dedupeWorkQueue(leads: WorkQueueRow[], enrolledNames: Set<string>) {
   const seen = new Set<string>()
   const result: WorkQueueRow[] = []
   for (const row of leads || []) {
-    const name = String(row.full_name || '').toLowerCase()
+    const name = normalizeName(row.full_name)
     if (!name || enrolledNames.has(name)) continue
-    const keyEmail = String(row.email || '').toLowerCase()
-    const keyPhone = String(row.phone || '').replace(/\D/g, '')
-    const dedupeKey = `${name}|${keyEmail}|${keyPhone}`
+    const dedupeKey = buildWorkQueueIdentityKey(row)
     if (seen.has(dedupeKey)) continue
     seen.add(dedupeKey)
     result.push(row)

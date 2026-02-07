@@ -24,12 +24,11 @@ test('dedupeWorkQueue drops enrolled and duplicates', () => {
     { full_name: 'Jane Doe', email: 'jane@example.com', phone: '111' },
     { full_name: 'John Smith', email: 'john@example.com', phone: '222' },
     { full_name: 'John Smith', email: 'john@example.com', phone: '222' }, // dup
-    { full_name: 'John Smith', email: 'john.s@example.com', phone: '222' }, // new email
+    { full_name: 'John Smith', email: 'john.s@example.com', phone: '222' }, // same phone -> dup identity
   ]
   const result = dedupeWorkQueue(leads, enrolled)
-  assert.equal(result.length, 2)
+  assert.equal(result.length, 1)
   assert.equal(result[0].full_name, 'John Smith')
-  assert.equal(result[1].full_name, 'John Smith')
 })
 
 test('collapseRetentionRows keeps one row per instructor', () => {

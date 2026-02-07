@@ -3683,19 +3683,34 @@ function renderSspReport(data) {
 
 function renderEnrollmentReport(data) {
   if (!enrollmentTable) return
+  if (enrollmentByLocation) enrollmentByLocation.innerHTML = ''
+  if (enrollmentByStaff) enrollmentByStaff.innerHTML = ''
+  if (enrollmentWorkQueue) enrollmentWorkQueue.innerHTML = ''
+
   if (!data) {
     enrollmentTable.innerHTML = '<div class="hint">No enrollment data.</div>'
+    if (enrollmentByLocation) enrollmentByLocation.innerHTML = '<div class="hint">No location data.</div>'
+    if (enrollmentByStaff) enrollmentByStaff.innerHTML = '<div class="hint">No staff signals.</div>'
+    if (enrollmentWorkQueue) enrollmentWorkQueue.innerHTML = '<div class="hint">No work queue items.</div>'
     return
   }
+
   const leads = Array.isArray(data.leads) ? data.leads : []
   const enrollments = Array.isArray(data.enrollments) ? data.enrollments : []
-  const dates = Array.from(new Set([...leads.map((l) => l.date), ...enrollments.map((e) => e.date)])).sort()
+  const attendance = Array.isArray(data.attendanceSignals) ? data.attendanceSignals : []
+
+  const dates = Array.from(new Set([
+    ...leads.map((l) => l.date),
+    ...enrollments.map((e) => e.date),
+    ...attendance.map((a) => a.date)
+  ])).filter(Boolean).sort()
+
   const leadMap = new Map(leads.map((l) => [l.date, l.count || 0]))
   const enrollMap = new Map(enrollments.map((e) => [e.date, e.count || 0]))
+  const attendanceMap = new Map(attendance.map((a) => [a.date, a.count || 0]))
+
   const leadCounts = dates.map((d) => leadMap.get(d) || 0)
   const enrollCounts = dates.map((d) => enrollMap.get(d) || 0)
-  const attendance = Array.isArray(data.attendanceSignals) ? data.attendanceSignals : []
-  const attendanceMap = new Map(attendance.map((a) => [a.date, a.count || 0]))
   const attendanceCounts = dates.map((d) => attendanceMap.get(d) || 0)
 
   enrollmentChart = renderChart(enrollmentChartEl, {
@@ -3716,12 +3731,12 @@ function renderEnrollmentReport(data) {
     enrollmentTable.innerHTML = '<div class="hint">No enrollment activity.</div>'
   } else {
     dates.forEach((date) => {
-    const item = document.createElement('div')
-    item.className = 'list-item'
-    item.innerHTML = `<strong>${date}</strong>
-      <div class="muted tiny">Leads ${leadMap.get(date) || 0} • Enrollments ${enrollMap.get(date) || 0}</div>`
-    enrollmentTable.appendChild(item)
-  })
+      const item = document.createElement('div')
+      item.className = 'list-item'
+      item.innerHTML = `<strong>${date}</strong>
+        <div class="muted tiny">Leads ${leadMap.get(date) || 0} • Enrollments ${enrollMap.get(date) || 0} • First-class signals ${attendanceMap.get(date) || 0}</div>`
+      enrollmentTable.appendChild(item)
+    })
   }
 
   if (enrollmentByLocation) {
@@ -3741,7 +3756,16 @@ function renderEnrollmentReport(data) {
   }
 
   if (enrollmentByStaff) {
-    const byStaff = Array.isArray(data.byStaff) ? data.byStaff : []
+    const byStaffRaw = Array.isArray(data.byStaff) ? data.byStaff : []
+    const byStaffIndex = new Map()
+    byStaffRaw.forEach((row) => {
+      const label = formatInstructorLabel(row.instructor)
+      const key = normalizeInstructorName(row.instructor || label).toLowerCase() || label.toLowerCase()
+      const prev = byStaffIndex.get(key) || { instructor: label, count: 0 }
+      prev.count += row.count || 0
+      byStaffIndex.set(key, prev)
+    })
+    const byStaff = Array.from(byStaffIndex.values()).sort((a, b) => (b.count || 0) - (a.count || 0))
     enrollmentByStaff.innerHTML = ''
     if (!byStaff.length) {
       enrollmentByStaff.innerHTML = '<div class="hint">No staff signals.</div>'
@@ -3757,7 +3781,20 @@ function renderEnrollmentReport(data) {
   }
 
   if (enrollmentWorkQueue) {
-    const work = Array.isArray(data.workQueue) ? data.workQueue : []
+    const workRaw = Array.isArray(data.workQueue) ? data.workQueue : []
+    const seen = new Set()
+    const work = []
+    workRaw.forEach((row) => {
+      const name = String(row.full_name || '').trim()
+      if (!name) return
+      const email = String(row.email || '').trim().toLowerCase()
+      const phone = String(row.phone || '').replace(/\D/g, '')
+      const date = String(row.lead_date || '').slice(0, 10)
+      const key = email ? `e:${email}` : (phone ? `p:${phone}` : `n:${name.toLowerCase()}|d:${date}`)
+      if (seen.has(key)) return
+      seen.add(key)
+      work.push(row)
+    })
     enrollmentWorkQueue.innerHTML = ''
     if (!work.length) {
       enrollmentWorkQueue.innerHTML = '<div class="hint">No work queue items.</div>'
@@ -3784,8 +3821,13 @@ function renderRetentionReport(data) {
   rows.forEach((row) => {
     const item = document.createElement('div')
     item.className = 'list-item'
+    const parts = []
+    if (row.location_name) parts.push(row.location_name)
+    parts.push(`Booked ${row.booked || 0}`)
+    parts.push(`Retained ${row.retained || 0}`)
+    parts.push(`${row.percent_this_cycle || 0}%`)
     item.innerHTML = `<strong>${row.instructor_name || ''}</strong>
-      <div class="muted tiny">Booked ${row.booked || 0} • Retained ${row.retained || 0} • ${row.percent_this_cycle || 0}%</div>`
+      <div class="muted tiny">${parts.filter(Boolean).join(' • ')}</div>`
     retentionTable.appendChild(item)
   })
 }
@@ -3801,8 +3843,12 @@ function renderAgedAccountsReport(data) {
   rows.forEach((row) => {
     const item = document.createElement('div')
     item.className = 'list-item'
+    const parts = []
+    if (row.location_name) parts.push(row.location_name)
+    parts.push(`Amount ${row.amount || 0}`)
+    parts.push(`Total ${row.total || 0}`)
     item.innerHTML = `<strong>${row.bucket || 'Bucket'}</strong>
-      <div class="muted tiny">Amount ${row.amount || 0} • Total ${row.total || 0}</div>`
+      <div class="muted tiny">${parts.filter(Boolean).join(' • ')}</div>`
     agedAccountsTable.appendChild(item)
   })
 }
@@ -3818,8 +3864,12 @@ function renderDropListReport(data) {
   rows.forEach((row) => {
     const item = document.createElement('div')
     item.className = 'list-item'
+    const parts = []
+    if (row.drop_date) parts.push(row.drop_date)
+    if (row.location_name) parts.push(row.location_name)
+    if (row.reason) parts.push(row.reason)
     item.innerHTML = `<strong>${row.swimmer_name || ''}</strong>
-      <div class="muted tiny">${row.drop_date || ''} • ${row.reason || ''}</div>`
+      <div class="muted tiny">${parts.filter(Boolean).join(' • ')}</div>`
     dropListTable.appendChild(item)
   })
 }
