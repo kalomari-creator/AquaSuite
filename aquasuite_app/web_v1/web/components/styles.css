@@ -62,6 +62,20 @@ body{
   background: var(--cardA);
 }
 
+.locations-banner{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:10px 0 0;
+  padding:10px 12px;
+  border-radius:14px;
+  border:1px solid rgba(245, 158, 11, .35);
+  background: rgba(245, 158, 11, .12);
+  color: #5a3b00;
+}
+.locations-banner .spacer{ flex:1; }
+.locations-banner button{ flex: 0 0 auto; }
+
 .qa-panel{
   display:flex;
   align-items:center;

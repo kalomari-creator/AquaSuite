@@ -129,6 +129,7 @@ const loginError = el('loginError')
 const viewHost = el('viewHost')
 const navList = el('navList')
 const locationSelect = el('locationSelect')
+const locationsApiBanner = el('locationsApiBanner')
 const dateSelect = el('dateSelect')
 const timeBlocks = el('timeBlocks')
 const timeActive = el('timeActive')
@@ -432,6 +433,8 @@ function updateFooterVersion() {
 }
 
 const locationPrefKey = 'aqua_location_id'
+const locationsCacheKey = 'aqua_locations_cache_v1'
+const locationsCacheAtKey = 'aqua_locations_cache_at_v1'
 const qaRolePrefKey = 'qa_role_preview'
 const layoutPrefKey = 'layoutMode'
 const activityFiltersKey = 'activity_filters_v1'
@@ -923,8 +926,7 @@ async function loadHomebaseShiftStatus() {
 }
 
 async function loadNotifications() {
-  const isAdmin = getEffectiveRoleKey() === 'admin'
-  const locationId = state.locationId || (isAdmin ? 'all' : null)
+  const locationId = state.locationId
   if ((!notificationList && !managerNotificationList) || !locationId) return
 
   const renderList = (el, items) => {
@@ -1265,14 +1267,6 @@ function setView(view, options = {}) {
   debugLog('VIEW', `setView("${view}")`, options)
   initViewHost()
   state.view = view
-  if (view === 'roster' && state.locationId === 'all') {
-    const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
-    if (first) {
-      state.locationId = first.id
-      if (locationSelect) locationSelect.value = first.id
-      localStorage.setItem(locationPrefKey, first.id)
-    }
-  }
   mountView(view)
   if (view !== 'roster') {
     timeBlocksExpanded = false
@@ -1421,9 +1415,79 @@ function setRosterMode(mode) {
   void loadRosterEntries()
 }
 
-async function loadLocations() {
-  const data = await apiFetch("/locations")
-  const locations = Array.isArray(data.locations) ? data.locations : []
+function readLocationsCache() {
+  try {
+    const raw = localStorage.getItem(locationsCacheKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeLocationsCache(locations) {
+  try {
+    localStorage.setItem(locationsCacheKey, JSON.stringify(Array.isArray(locations) ? locations : []))
+    localStorage.setItem(locationsCacheAtKey, String(Date.now()))
+  } catch {}
+}
+
+function renderLocationsApiBanner(message, { retry = false } = {}) {
+  if (!locationsApiBanner) return
+  if (!message) {
+    locationsApiBanner.classList.add('hidden')
+    locationsApiBanner.innerHTML = ''
+    return
+  }
+  locationsApiBanner.classList.remove('hidden')
+  locationsApiBanner.innerHTML = ''
+
+  const label = document.createElement('strong')
+  label.textContent = 'Locations:'
+  locationsApiBanner.appendChild(label)
+
+  const text = document.createElement('span')
+  text.textContent = message
+  locationsApiBanner.appendChild(text)
+
+  if (retry) {
+    const spacer = document.createElement('div')
+    spacer.className = 'spacer'
+    locationsApiBanner.appendChild(spacer)
+
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'secondary miniBtn'
+    btn.textContent = 'Retry'
+    btn.addEventListener('click', () => {
+      btn.disabled = true
+      btn.textContent = 'Retrying…'
+      loadLocations({ reloadAfter: true }).catch(() => {})
+    })
+    locationsApiBanner.appendChild(btn)
+  }
+}
+
+async function loadLocations(options = {}) {
+  renderLocationsApiBanner('')
+
+  let locations = []
+  let usedCache = false
+  try {
+    const data = await apiFetch("/locations")
+    locations = Array.isArray(data.locations) ? data.locations : []
+    writeLocationsCache(locations)
+  } catch (err) {
+    usedCache = true
+    locations = readLocationsCache()
+    const msg = locations.length
+      ? 'Locations API unavailable. Showing cached list.'
+      : 'Locations API unavailable. Retry to load locations.'
+    renderLocationsApiBanner(msg, { retry: true })
+    if (DEBUG_UI) console.warn('Locations load failed', err)
+  }
+
   const unique = []
   const seen = new Set()
   locations.forEach((loc) => {
@@ -1446,12 +1510,16 @@ async function loadLocations() {
     opt.textContent = loc.name
     locationSelect.appendChild(opt)
   })
+
+  const currentMatch = state.locationId ? unique.find((loc) => loc.id === state.locationId) : null
   const storedLocation = localStorage.getItem(locationPrefKey)
   const storedMatch = unique.find((loc) => loc.id === storedLocation)
   const defaultKey = state.defaultLocationKey ? String(state.defaultLocationKey).toUpperCase() : ''
   const defaultMatch = unique.find((loc) => String(loc.state || '').toUpperCase() == defaultKey || String(loc.code || '').toUpperCase() == defaultKey)
   const nyMatch = unique.find((loc) => String(loc.state || '').toUpperCase() == 'NY')
-  state.locationId = storedMatch?.id || defaultMatch?.id || nyMatch?.id || unique[0]?.id || null
+
+  const firstPhysical = unique.find((loc) => loc.id && loc.id !== 'all')
+  state.locationId = currentMatch?.id || storedMatch?.id || defaultMatch?.id || nyMatch?.id || firstPhysical?.id || unique[0]?.id || null
   locationSelect.value = state.locationId || ""
   if (state.locationId) localStorage.setItem(locationPrefKey, state.locationId)
   if (rosterModeSelect) rosterModeSelect.disabled = state.locationId === 'all'
@@ -1462,6 +1530,14 @@ async function loadLocations() {
   renderSavedViews('roster')
   renderSavedViews('activity')
 
+  if (options.reloadAfter) {
+    void loadRosterEntries()
+    if (state.view === 'uploads') loadUploads()
+    if (state.view === 'staff') loadStaff()
+    if (state.view === 'reports') loadReports()
+    if (state.view === 'notifications') loadNotifications()
+    if (state.view === 'activity') loadActivityFeed()
+  }
 }
 
 function getLocationFeatures(loc) {
@@ -3091,8 +3167,7 @@ function renderActivityFeed() {
 
 async function loadBillingTickets() {
   if (!billingQueueList) return
-  const role = getEffectiveRoleKey()
-  const locationId = role === 'admin' ? 'all' : state.locationId
+  const locationId = state.locationId
   if (!locationId) {
     billingQueueList.innerHTML = '<div class="hint">Select a location to view billing tickets.</div>'
     return
@@ -3868,8 +3943,7 @@ function exportContactsCsv() {
 }
 
 async function loadReports() {
-  const role = getEffectiveRoleKey()
-  const locationId = role === 'admin' ? 'all' : state.locationId
+  const locationId = state.locationId
   if (!locationId) {
     setReportsStatus('Select a location to view reports.')
     return
@@ -3932,8 +4006,7 @@ async function loadReports() {
 
 async function loadContacts() {
   if (!contactsTable) return
-  const role = getEffectiveRoleKey()
-  const locationId = role === 'admin' ? 'all' : state.locationId
+  const locationId = state.locationId
   if (!locationId) {
     contactsTable.innerHTML = '<div class="hint">Select a location to view contacts.</div>'
     return
@@ -3967,8 +4040,7 @@ async function openContactMerge(contactId) {
 }
 
 async function loadUploads() {
-  const role = getEffectiveRoleKey()
-  const locationId = role === 'admin' ? 'all' : state.locationId
+  const locationId = state.locationId
   if (!locationId) {
     if (uploadHistoryList) uploadHistoryList.innerHTML = '<div class="hint">Select a location to view uploads.</div>'
     return
@@ -3998,8 +4070,7 @@ async function loadUploads() {
 }
 
 async function loadStaff() {
-  const role = getEffectiveRoleKey()
-  const locationId = role === 'admin' ? 'all' : state.locationId
+  const locationId = state.locationId
   if (!locationId) {
     if (staffList) staffList.innerHTML = '<div class="hint">Select a location to view staff.</div>'
     return
@@ -4284,13 +4355,6 @@ locationSelect?.addEventListener('change', () => {
   state.search = ''
   if (rosterSearch) rosterSearch.value = ''
   if (searchClear) searchClear.classList.add('hidden')
-  if (state.view === 'roster' && state.locationId === 'all') {
-    const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
-    if (first) {
-      state.locationId = first.id
-      locationSelect.value = first.id
-    }
-  }
   if (state.locationId === 'all') {
     state.rosterMode = 'all'
     if (rosterModeSelect) {
@@ -4308,10 +4372,10 @@ locationSelect?.addEventListener('change', () => {
   renderSavedViews('activity')
 
   void loadRosterEntries()
+  loadUploads()
+  loadStaff()
+  loadInstructorVariants()
   if (state.locationId !== 'all') {
-    loadUploads()
-    loadStaff()
-    loadInstructorVariants()
     loadDayClosure()
     refreshAlerts()
   }
@@ -4335,8 +4399,10 @@ dateSelect?.addEventListener('change', () => {
   timeBlocksExpanded = false
   if (timeBlocks) timeBlocks.classList.add('hidden')
   void loadRosterEntries()
-  loadDayClosure()
-  refreshAlerts()
+  if (state.locationId !== 'all') {
+    loadDayClosure()
+    refreshAlerts()
+  }
   if (state.view === 'reports') loadReports()
 })
 
