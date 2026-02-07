@@ -832,13 +832,33 @@
           <button class="tab" data-subtab-btn="announcer">Announcer</button>
         </div>
         <div data-subtab="announcer">
-        <div class="card">
+        <div class="card" id="announcerDisabledCard">
           <div class="row">
-            <div class="pill">Announcer (Westchester)</div>
+            <div class="pill">Announcer</div>
             <div class="spacer"></div>
-            <span class="muted tiny">Visible only when announcer is enabled for the location.</span>
+            <span class="muted tiny">Disabled for this location.</span>
           </div>
-          <div class="hint">Announcer controls are enabled for Westchester only. Audio routing is handled on the server.</div>
+          <div class="hint">Enable announcer for this location to use deck calls.</div>
+        </div>
+
+        <div class="card" id="announcerActiveCard" class="hidden">
+          <div class="row">
+            <div class="pill">Announcer</div>
+            <div class="spacer"></div>
+            <button class="secondary miniBtn" id="announcerTimeToggle" type="button">Selected: <span id="announcerTimeSelected">None</span></button>
+          </div>
+          <div class="row" style="margin-top:6px;">
+            <div class="pill tiny">Status: <strong id="announcerStatus">Select a time</strong></div>
+            <div class="spacer"></div>
+          </div>
+          <div id="announcerBlocks" class="blocks hidden"></div>
+          <div class="row" style="margin-top:10px;">
+            <textarea id="announcerText" placeholder="Type an announcement…" style="flex:1; min-height:80px;"></textarea>
+          </div>
+          <div class="row" style="margin-top:10px;">
+            <button class="primary" id="announcerSpeakBtn" type="button">Speak</button>
+            <button class="secondary" id="announcerClearBtn" type="button">Clear</button>
+          </div>
         </div>
         </div>
       </section>

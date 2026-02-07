@@ -286,6 +286,15 @@ const locationAddTimezone = el('locationAddTimezone')
 const locationAddBtn = el('locationAddBtn')
 const locationAddStatus = el('locationAddStatus')
 const announcerTab = el('announcerTab')
+const announcerDisabledCard = el('announcerDisabledCard')
+const announcerActiveCard = el('announcerActiveCard')
+const announcerBlocks = el('announcerBlocks')
+const announcerTimeToggle = el('announcerTimeToggle')
+const announcerTimeSelected = el('announcerTimeSelected')
+const announcerStatus = el('announcerStatus')
+const announcerText = el('announcerText')
+const announcerSpeakBtn = el('announcerSpeakBtn')
+const announcerClearBtn = el('announcerClearBtn')
 const revBtn = el('revBtn')
 const revModal = el('revModal')
 const revClose = el('revClose')
@@ -454,6 +463,7 @@ const ADMIN_NAV_ITEMS = [
 const viewStore = new Map()
 let mountedView = null
 let timeBlocksExpanded = false
+let announcerBlocksExpanded = false
 
 const weekendTimeSlots = ['08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30']
 
@@ -1460,6 +1470,7 @@ function getLocationFeatures(loc) {
   }
   const merged = { ...base, ...(loc?.features || {}) }
   if (loc?.announcer_enabled) merged.announcer_enabled = true
+  if (loc?.has_announcements) merged.announcer_enabled = true
   return merged
 }
 
@@ -1503,6 +1514,8 @@ function applyLocationFeatures() {
   if (!navViews.includes(state.view)) setView("roster")
   if (!features.announcer_enabled && state.view === "announcer") setView("roster")
   if (!features.observations_enabled && state.view === "observations") setView("roster")
+  if (announcerDisabledCard) announcerDisabledCard.classList.toggle('hidden', !features.announcer_enabled)
+  if (announcerActiveCard) announcerActiveCard.classList.toggle('hidden', !features.announcer_enabled)
   if (eodCloseCard) eodCloseCard.classList.toggle("hidden", !(role === "admin" || role === "manager"))
   if (integrationStatusCard) integrationStatusCard.classList.toggle("hidden", role !== "admin")
   if (rosterOnly && state.view !== "roster") setView("roster")
@@ -1786,6 +1799,55 @@ function buildTimeBlocks() {
   }
 }
 
+function buildAnnouncerBlocks() {
+  if (state.view !== 'announcer') return
+  if (!announcerBlocks || !announcerTimeToggle || !announcerTimeSelected) return
+  const features = getLocationFeatures(state.locations.find((l) => l.id === state.locationId))
+  if (!features.announcer_enabled) {
+    announcerBlocks.classList.add('hidden')
+    announcerTimeToggle.disabled = true
+    announcerTimeSelected.textContent = 'None'
+    return
+  }
+  announcerTimeToggle.disabled = false
+  let classes = uniqueClassTimes(Array.isArray(state.classInstances) ? state.classInstances : [])
+  if (!classes.length) {
+    announcerBlocks.innerHTML = '<div class="hint">No classes today.</div>'
+    announcerBlocks.classList.remove('hidden')
+    announcerTimeSelected.textContent = 'None'
+    return
+  }
+  announcerBlocks.innerHTML = ''
+  const allBtn = document.createElement('button')
+  allBtn.className = 'secondary miniBtn'
+  allBtn.textContent = 'All times'
+  allBtn.classList.toggle('active', state.showAllTimes)
+  allBtn.addEventListener('click', () => {
+    state.selectedBlock = null
+    state.showAllTimes = true
+    announcerBlocksExpanded = false
+    buildAnnouncerBlocks()
+    buildTimeBlocks()
+  })
+  announcerBlocks.appendChild(allBtn)
+  classes.forEach((c) => {
+    const btn = document.createElement('button')
+    btn.className = 'secondary miniBtn'
+    btn.textContent = formatTime(c.start_time)
+    btn.classList.toggle('active', !state.showAllTimes && state.selectedBlock === c.start_time)
+    btn.addEventListener('click', () => {
+      state.selectedBlock = c.start_time
+      state.showAllTimes = false
+      announcerBlocksExpanded = false
+      buildAnnouncerBlocks()
+      buildTimeBlocks()
+    })
+    announcerBlocks.appendChild(btn)
+  })
+  announcerBlocks.classList.toggle('hidden', !announcerBlocksExpanded)
+  announcerTimeSelected.textContent = state.showAllTimes ? 'All' : (state.selectedBlock ? formatTime(state.selectedBlock) : 'None')
+}
+
 
 
 async function loadAdminUsers() {
@@ -2057,7 +2119,7 @@ async function loadObservationClasses() {
     if (obsRosterStatus) obsRosterStatus.textContent = 'Select a specific location to load classes.'
     return
   }
-  const dateVal = obsDate.value || new Date().toISOString().slice(0, 10)
+  const dateVal = state.date || obsDate.value || new Date().toISOString().slice(0, 10)
   obsDate.value = dateVal
   obsRosterStatus.textContent = 'Loading roster classes…'
   try {
@@ -4007,6 +4069,39 @@ todayBtn?.addEventListener('click', () => {
 timePillToggle?.addEventListener('click', () => {
   timeBlocksExpanded = !timeBlocksExpanded
   if (timeBlocks) timeBlocks.classList.toggle('hidden', !timeBlocksExpanded)
+})
+
+announcerTimeToggle?.addEventListener('click', () => {
+  announcerBlocksExpanded = !announcerBlocksExpanded
+  if (announcerBlocks) announcerBlocks.classList.toggle('hidden', !announcerBlocksExpanded)
+})
+
+announcerSpeakBtn?.addEventListener('click', async () => {
+  if (!announcerText || !announcerStatus) return
+  const text = announcerText.value.trim()
+  if (!text) {
+    announcerStatus.textContent = 'Type a message first.'
+    return
+  }
+  announcerStatus.textContent = 'Sending…'
+  try {
+    await apiFetch('/announcer/speak', {
+      method: 'POST',
+      body: JSON.stringify({
+        locationId: state.locationId,
+        time: state.selectedBlock,
+        text
+      })
+    })
+    announcerStatus.textContent = 'Sent ✓'
+  } catch (err) {
+    announcerStatus.textContent = err?.error || 'Announcer failed'
+  }
+})
+
+announcerClearBtn?.addEventListener('click', () => {
+  if (announcerText) announcerText.value = ''
+  if (announcerStatus) announcerStatus.textContent = 'Cleared'
 })
 
 rosterSearch?.addEventListener('input', () => {
