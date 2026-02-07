@@ -40,31 +40,12 @@ DELETE FROM drop_events WHERE ctid IN (SELECT ctid FROM dup WHERE rn > 1);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_drop_events_key
   ON drop_events (location_id, drop_date, lower(COALESCE(swimmer_name,'')), lower(COALESCE(reason,'')));
 
--- Instructor retention snapshots and rows
-WITH dedup_snap AS (
-  SELECT ctid, ROW_NUMBER() OVER (
-    PARTITION BY location_id, report_date
-    ORDER BY id DESC
-  ) rn
-  FROM retention_snapshots
-)
-DELETE FROM retention_snapshots WHERE ctid IN (SELECT ctid FROM dedup_snap WHERE rn > 1);
-
+-- Instructor retention snapshots and rows (table already unique on instructor_name/as_of range)
+-- Add partial index to prevent duplicates by location/date
 CREATE UNIQUE INDEX IF NOT EXISTS uq_retention_snapshot_key
   ON retention_snapshots (location_id, report_date);
 
--- Rows already constrained by existing unique key on instructor/date; skip row-level dedupe
-
 -- Aged accounts snapshots and rows
-WITH dedup_aa AS (
-  SELECT ctid, ROW_NUMBER() OVER (
-    PARTITION BY location_id, report_date
-    ORDER BY id DESC
-  ) rn
-  FROM aged_accounts_snapshots
-)
-DELETE FROM aged_accounts_snapshots WHERE ctid IN (SELECT ctid FROM dedup_aa WHERE rn > 1);
-
 CREATE UNIQUE INDEX IF NOT EXISTS uq_aged_accounts_snapshot
   ON aged_accounts_snapshots (location_id, report_date);
 
@@ -83,7 +64,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_aged_accounts_row_key
 -- migrate:down
 DROP INDEX IF EXISTS uq_aged_accounts_row_key;
 DROP INDEX IF EXISTS uq_aged_accounts_snapshot;
-DROP INDEX IF EXISTS uq_retention_row_key;
 DROP INDEX IF EXISTS uq_retention_snapshot_key;
 DROP INDEX IF EXISTS uq_drop_events_key;
 DROP INDEX IF EXISTS uq_enrollment_events_key;

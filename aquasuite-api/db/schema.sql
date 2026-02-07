@@ -1,4 +1,4 @@
-\restrict C8CgQlAug2eNR1RiQCzshIpamynXVeNyhDY3GmJ1tVHj4vWkea1c6wpw88EOFfB
+\restrict 1GQgwcTzTANbGzFhmh2Rf2sWAxHlgGG5flA6BtVvJLKV5h8nnr5QlI82YTYd3Up
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
@@ -1279,6 +1279,14 @@ ALTER TABLE ONLY public.class_instances
 
 
 --
+-- Name: class_instances class_instances_unique_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.class_instances
+    ADD CONSTRAINT class_instances_unique_key UNIQUE (location_id, class_date, start_time, class_name);
+
+
+--
 -- Name: client_intake_activity client_intake_activity_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1596,6 +1604,14 @@ ALTER TABLE ONLY public.roles
 
 ALTER TABLE ONLY public.roster_entries
     ADD CONSTRAINT roster_entries_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: roster_entries roster_entries_unique_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.roster_entries
+    ADD CONSTRAINT roster_entries_unique_key UNIQUE (location_id, class_date, start_time, swimmer_name);
 
 
 --
@@ -2179,6 +2195,48 @@ CREATE INDEX roster_uploads_location_id_idx ON public.roster_uploads USING btree
 --
 
 CREATE INDEX roster_uploads_uploaded_at_idx ON public.roster_uploads USING btree (uploaded_at);
+
+
+--
+-- Name: uq_acne_leads_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_acne_leads_key ON public.acne_leads USING btree (location_id, lead_date, lower(COALESCE(full_name, ''::text)), lower(COALESCE(email, ''::text)), regexp_replace(COALESCE(phone, ''::text), '\D'::text, ''::text, 'g'::text));
+
+
+--
+-- Name: uq_aged_accounts_row_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_aged_accounts_row_key ON public.aged_accounts_rows USING btree (snapshot_id, lower(COALESCE(bucket, ''::text)));
+
+
+--
+-- Name: uq_aged_accounts_snapshot; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_aged_accounts_snapshot ON public.aged_accounts_snapshots USING btree (location_id, report_date);
+
+
+--
+-- Name: uq_drop_events_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_drop_events_key ON public.drop_events USING btree (location_id, drop_date, lower(COALESCE(swimmer_name, ''::text)), lower(COALESCE(reason, ''::text)));
+
+
+--
+-- Name: uq_enrollment_events_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_enrollment_events_key ON public.enrollment_events USING btree (location_id, event_date, lower(COALESCE(swimmer_name, ''::text)));
+
+
+--
+-- Name: uq_retention_snapshot_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_retention_snapshot_key ON public.retention_snapshots USING btree (location_id, report_date);
 
 
 --
@@ -3069,7 +3127,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict C8CgQlAug2eNR1RiQCzshIpamynXVeNyhDY3GmJ1tVHj4vWkea1c6wpw88EOFfB
+\unrestrict 1GQgwcTzTANbGzFhmh2Rf2sWAxHlgGG5flA6BtVvJLKV5h8nnr5QlI82YTYd3Up
 
 
 --
@@ -3109,4 +3167,6 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260202140000'),
     ('20260203120000'),
     ('20260203121000'),
-    ('20260205180000');
+    ('20260205180000'),
+    ('20260206000000'),
+    ('20260206003000');
