@@ -1997,6 +1997,21 @@ app.post('/reports/upload', async (req, reply) => {
 
   if (preflight.reportType === 'unknown') preflight.reportType = null
   const resolvedReportType = preflight.reportType || reportTypeHint || 'report'
+
+  const dateRange = preflight.dateRanges?.[0] || {}
+  let detectedStart = parseUsDate(dateRange.start || null)
+  let detectedEnd = parseUsDate(dateRange.end || null)
+  let rangeSwapped = false
+  if (detectedStart && detectedEnd && detectedEnd < detectedStart) {
+    const swap = detectedStart
+    detectedStart = detectedEnd
+    detectedEnd = swap
+    rangeSwapped = true
+  }
+
+  const parseWarnings = [...(preflight.warnings || [])]
+  if (rangeSwapped) parseWarnings.push('date_range_swapped')
+
   const uploadRes = await pool.query(
     `INSERT INTO report_uploads
       (location_id, report_type, report_title, detected_location_name, detected_location_ids, date_ranges, sha256, stored_path, uploaded_by_user_id)
@@ -2015,11 +2030,9 @@ app.post('/reports/upload', async (req, reply) => {
       sess.user_id
     ]
   )
-
-  const dateRange = preflight.dateRanges?.[0] || {}
-  const detectedStart = parseUsDate(dateRange.start || null)
-  const detectedEnd = parseUsDate(dateRange.end || null)
-
+  if (!uploadRes.rowCount) {
+    parseWarnings.push('duplicate_upload')
+  }
 
   const uploadLogRes = await pool.query(
     `INSERT INTO uploads
@@ -2034,11 +2047,10 @@ app.post('/reports/upload', async (req, reply) => {
       detectedEnd,
       null,
       null,
-      JSON.stringify(preflight.warnings || [])
+      JSON.stringify(parseWarnings)
     ]
   )
   const uploadLogId = uploadLogRes.rows[0]?.id || null
-  const parseWarnings = [...(preflight.warnings || [])]
 
   let parsedCount = 0
   let insertedCount = 0
@@ -2250,21 +2262,28 @@ app.get('/reports/attendance', async (req, reply) => {
     if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
   }
 
-  const params: any[] = locationId === 'all' ? [start, end] : [locationId, start, end]
+  const isAll = locationId === 'all'
+  let params: any[] = []
+  const whereParts: string[] = []
+  if (isAll) {
+    params = [start, end]
+    whereParts.push('class_date BETWEEN $1 AND $2')
+  } else {
+    params = [locationId, start, end]
+    whereParts.push('location_id=$1', 'class_date BETWEEN $2 AND $3')
+  }
   let idx = params.length + 1
-  let where = locationId === 'all'
-    ? `class_date BETWEEN $1 AND $2`
-    : `location_id=$1 AND class_date BETWEEN $2 AND $3`
   if (instructor) {
-    where += ` AND (actual_instructor=$${idx} OR scheduled_instructor=$${idx} OR instructor_name=$${idx})`
+    whereParts.push(`(actual_instructor=$${idx} OR scheduled_instructor=$${idx} OR instructor_name=$${idx})`)
     params.push(instructor)
     idx += 1
   }
   if (program) {
-    where += ` AND program=$${idx}`
+    whereParts.push(`program=$${idx}`)
     params.push(program)
     idx += 1
   }
+  const where = whereParts.join(' AND ')
 
   const byDateRes = await pool.query(
     `SELECT class_date::text as date, attendance, COUNT(*)::int as count
@@ -2274,6 +2293,7 @@ app.get('/reports/attendance', async (req, reply) => {
      ORDER BY class_date`,
     params
   )
+
   const dateMap = new Map<string, any>()
   byDateRes.rows.forEach((row) => {
     const entry = dateMap.get(row.date) || { date: row.date, present: 0, absent: 0, unknown: 0, total: 0 }
@@ -2296,7 +2316,6 @@ app.get('/reports/attendance', async (req, reply) => {
      ORDER BY instructor`,
     params
   )
-
   const summary = {
     total: byInstructorRes.rows.reduce((sum, r) => sum + (r.total || 0), 0),
     present: byInstructorRes.rows.reduce((sum, r) => sum + (r.present || 0), 0),
@@ -2307,15 +2326,15 @@ app.get('/reports/attendance', async (req, reply) => {
   const filtersRes = await pool.query(
     `SELECT DISTINCT COALESCE(actual_instructor, scheduled_instructor, instructor_name) as instructor
      FROM roster_entries
-     WHERE location_id=$1 AND class_date BETWEEN $2 AND $3 AND COALESCE(actual_instructor, scheduled_instructor, instructor_name) IS NOT NULL
+     WHERE ${isAll ? 'class_date BETWEEN $1 AND $2' : 'location_id=$1 AND class_date BETWEEN $2 AND $3'} AND COALESCE(actual_instructor, scheduled_instructor, instructor_name) IS NOT NULL
      ORDER BY instructor`,
-    locationId === 'all' ? [start, end] : [locationId, start, end]
+    isAll ? [start, end] : [locationId, start, end]
   )
   const programRes = await pool.query(
     `SELECT DISTINCT program FROM roster_entries
-     WHERE ${locationId === 'all' ? 'class_date BETWEEN $1 AND $2' : 'location_id=$1 AND class_date BETWEEN $2 AND $3'} AND program IS NOT NULL
+     WHERE ${isAll ? 'class_date BETWEEN $1 AND $2' : 'location_id=$1 AND class_date BETWEEN $2 AND $3'} AND program IS NOT NULL
      ORDER BY program`,
-    locationId === 'all' ? [start, end] : [locationId, start, end]
+    isAll ? [start, end] : [locationId, start, end]
   )
 
   return reply.send({
@@ -2660,13 +2679,25 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
     leadParams
   )
 
+  // Build roster-specific where since roster uses class_date
+  const rosterParams: any[] = locationId === 'all' ? [] : [locationId]
+  let rosterWhere = locationId === 'all' ? `WHERE 1=1` : `WHERE location_id=$1`
+  if (start) {
+    rosterParams.push(start)
+    rosterWhere += ` AND class_date >= $${rosterParams.length}`
+  }
+  if (end) {
+    rosterParams.push(end)
+    rosterWhere += ` AND class_date <= $${rosterParams.length}`
+  }
+
   const attendanceSignals = await pool.query(
     `SELECT class_date::text as date, COUNT(*)::int as count
      FROM roster_entries
-     WHERE ${where} AND flag_first_time=true
+     ${rosterWhere} AND flag_first_time=true
      GROUP BY class_date
      ORDER BY class_date`,
-    params
+    rosterParams
   )
 
   let byLocation = []
@@ -2702,10 +2733,10 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
     `SELECT COALESCE(actual_instructor, scheduled_instructor, instructor_name, 'Unassigned') as instructor,
             COUNT(*)::int as count
      FROM roster_entries
-     WHERE ${where} AND flag_first_time=true
+     ${rosterWhere} AND flag_first_time=true
      GROUP BY instructor
      ORDER BY count DESC`,
-    params
+    rosterParams
   )
 
   const enrollmentNames = await pool.query(
@@ -3011,7 +3042,13 @@ app.post('/uploads/roster', async (req, reply) => {
       await client.query(
         `INSERT INTO class_instances
           (location_id, upload_id, class_date, start_time, end_time, class_name, scheduled_instructor, actual_instructor, is_sub)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT (location_id, class_date, start_time, class_name) DO UPDATE SET
+           upload_id=EXCLUDED.upload_id,
+           end_time=EXCLUDED.end_time,
+           scheduled_instructor=EXCLUDED.scheduled_instructor,
+           actual_instructor=EXCLUDED.actual_instructor,
+           is_sub=EXCLUDED.is_sub`,
         [
           locationId,
           uploadId,

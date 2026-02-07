@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio"
+import { parseUsDate } from "../utils/reportParsing.js"
 
 export type ReportMetadata = {
   reportType: string
@@ -13,7 +14,7 @@ const REPORT_TYPES: { key: string; patterns: RegExp[] }[] = [
   { key: "aged_accounts", patterns: [/Aged Accounts/i] },
   { key: "drop_list", patterns: [/Drop List/i] },
   { key: "new_enrollments", patterns: [/New Enrollments/i, /New Enrollment/i, /Enrollment List/i] },
-  { key: "acne", patterns: [/ACNE/i, /Accounts Created Not Enrolled/i] },
+  { key: "acne", patterns: [/ACNE/i, /Accounts Created Not Enrolled/i, /Phonebook Report/i, /Family Phonebook/i] },
   { key: "roll_sheets", patterns: [/Roll Sheets/i, /Rollsheet/i, /Roster History/i] },
   { key: "roster", patterns: [/Roster/i] }
 ]
@@ -85,7 +86,14 @@ export function detectReportMetadata(html: string): Omit<ReportMetadata, "detect
   }
 
   const headerText = normalizeText($("body").text())
-  const dateRanges = findDateRanges(headerText)
+  const dateRanges = findDateRanges(headerText).map((range) => {
+    const startIso = parseUsDate(range.start || range.raw || null)
+    const endIso = parseUsDate(range.end || null)
+    if (startIso && endIso && endIso < startIso) {
+      return { ...range, start: range.end, end: range.start }
+    }
+    return range
+  })
   if (!dateRanges.length) warnings.push("date_range_not_detected")
 
   return {

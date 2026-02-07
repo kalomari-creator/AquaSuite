@@ -118,6 +118,7 @@ let enrollmentChart = null
 let retentionChart = null
 let agedAccountsChart = null
 let dropListChart = null
+let billingDraft = null
 const reportPreflightCache = {}
 let pendingReportUpload = null
 
@@ -125,19 +126,22 @@ const loginPanel = el('loginPanel')
 const appPanel = el('appPanel')
 const loginForm = el('loginForm')
 const loginError = el('loginError')
+const viewHost = el('viewHost')
+const navList = el('navList')
 const locationSelect = el('locationSelect')
 const dateSelect = el('dateSelect')
 const timeBlocks = el('timeBlocks')
 const timeActive = el('timeActive')
-const timeBlockToggle = el('timeBlockToggle')
-const timeBlockSelect = el('timeBlockSelect')
+const timePillToggle = el('timePillToggle')
+const timeSelectedLabel = el('timeSelectedLabel')
 const timeBlockStatus = el('timeBlockStatus')
-const selectedBlock = el('selectedBlock')
 const homebaseShiftStatus = el('homebaseShiftStatus')
+const timeBlockCard = el('timeBlockCard')
 const rosterTable = el('rosterTable')
 const rosterMeta = el('rosterMeta')
 const rosterEmpty = el('rosterEmpty')
 const rosterUploadCard = el('rosterUploadCard')
+const rosterTableCard = el('rosterTableCard')
 const rosterSearch = el('rosterSearch')
 const addSwimmerBtn = el('addSwimmerBtn')
 const searchClear = el('searchClear')
@@ -291,6 +295,7 @@ const filtersPanel = el('filtersPanel')
 const rosterActionDock = el('rosterActionDock')
 const rosterSaveStatus = el('rosterSaveStatus')
 
+const gearAdminLinks = el('gearAdminLinks')
 const userAdminCard = el('userAdminCard')
 const userAdminFirst = el('userAdminFirst')
 const userAdminLast = el('userAdminLast')
@@ -429,6 +434,29 @@ let layoutPref = localStorage.getItem(layoutPrefKey) || 'auto'
 localStorage.setItem(layoutPrefKey, layoutPref)
 let lastLayout = null
 
+const NAV_ITEMS = [
+  { view: 'roster', label: 'Roster', feature: 'roster', roles: ['admin', 'manager', 'instructor', 'readonly'] },
+  { view: 'uploads', label: 'Uploads', feature: 'roster', roles: ['admin', 'manager'] },
+  { view: 'reports', label: 'Reports', feature: 'reports', roles: ['admin', 'manager'] },
+  { view: 'observations', label: 'Observations', feature: 'observations', roles: ['admin', 'manager', 'instructor'] },
+  { view: 'activity', label: 'Activity', feature: null, roles: ['admin', 'manager'] },
+  { view: 'notifications', label: 'Notifications', feature: null, roles: ['admin', 'manager', 'instructor'] },
+  { view: 'announcer', label: 'Announcer', feature: 'announcer', roles: ['admin', 'manager', 'instructor', 'readonly'] }
+]
+
+const ADMIN_NAV_ITEMS = [
+  { view: 'staff', label: 'Staff management' },
+  { view: 'intakes', label: 'Intakes configuration' },
+  { view: 'locations', label: 'Location management' },
+  { view: 'uploads', label: 'Integrations status & uploads' }
+]
+
+const viewStore = new Map()
+let mountedView = null
+let timeBlocksExpanded = false
+
+const weekendTimeSlots = ['08:30','09:00','09:30','10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30']
+
 function isoDateStart(d) {
   const dt = new Date(d)
   dt.setHours(0,0,0,0)
@@ -447,6 +475,19 @@ function formatDateInputValue(d) {
   const mm = String(dt.getMonth()+1).padStart(2,'0')
   const dd = String(dt.getDate()).padStart(2,'0')
   return `${yyyy}-${mm}-${dd}`
+}
+
+function todayIsoInTz(tz = 'America/New_York') {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    }).format(new Date())
+  } catch (e) {
+    return new Date().toISOString().slice(0, 10)
+  }
 }
 
 function detectLayoutMode() {
@@ -525,6 +566,87 @@ function getEffectiveRoleLabel() {
   if (key === 'instructor') return 'Aquatics Staff'
   if (key === 'readonly') return 'Guard'
   return key
+}
+
+function getViewNode(view) {
+  const key = String(view || '').toLowerCase()
+  if (!viewStore.size) initViewHost()
+  return viewStore.get(key) || null
+}
+
+function initViewHost() {
+  if (!viewHost || viewStore.size) return
+  const sections = Array.from(document.querySelectorAll('section[id^="view"]'))
+  if (!sections.length) return
+  sections.forEach((section) => {
+    const key = section.id.replace(/^view/, '').toLowerCase()
+    viewStore.set(key, section)
+    section.parentElement?.removeChild(section)
+  })
+}
+
+function mountView(view) {
+  if (!viewHost) return
+  if (!viewStore.size) initViewHost()
+  const key = String(view || '').toLowerCase()
+  const next = viewStore.get(key)
+  if (!next) return
+  if (mountedView === key && viewHost.contains(next)) return
+  viewHost.innerHTML = ''
+  viewHost.appendChild(next)
+  mountedView = key
+}
+
+function renderGearLinks() {
+  if (!gearAdminLinks) return
+  const isAdmin = getEffectiveRoleKey() === 'admin'
+  gearAdminLinks.classList.toggle('hidden', !isAdmin)
+  gearAdminLinks.innerHTML = ''
+  if (!isAdmin) return
+  ADMIN_NAV_ITEMS.forEach((item) => {
+    const btn = document.createElement('button')
+    btn.className = 'secondary'
+    btn.type = 'button'
+    btn.dataset.gearNav = item.view
+    btn.textContent = item.label
+    btn.addEventListener('click', () => {
+      setView(item.view)
+      activateView(item.view)
+      closeGearMenu()
+    })
+    gearAdminLinks.appendChild(btn)
+  })
+}
+
+function buildNavMenu() {
+  if (!navList) return
+  const role = getEffectiveRoleKey()
+  const loc = state.locations.find((l) => l.id === state.locationId)
+  const features = getLocationFeatures(loc)
+  navList.innerHTML = ''
+  NAV_ITEMS.forEach((item) => {
+    if (!item.roles.includes(role)) return
+    if (item.feature === 'reports' && !features.reports_enabled) return
+    if (item.feature === 'observations' && !features.observations_enabled) return
+    if (item.feature === 'announcer' && !features.announcer_enabled) return
+    const btn = document.createElement('button')
+    btn.className = 'navItem'
+    btn.dataset.view = item.view
+    btn.textContent = item.label
+    btn.addEventListener('click', () => {
+      setView(item.view)
+      if (state.subtabs[item.view]) setSubtab(item.view, state.subtabs[item.view])
+      activateView(item.view)
+      closeNavDrawer()
+    })
+    navList.appendChild(btn)
+  })
+  if (!navList.children.length) {
+    const hint = document.createElement('div')
+    hint.className = 'hint'
+    hint.textContent = 'No pages available for this role.'
+    navList.appendChild(hint)
+  }
 }
 
 function normalizeInstructorName(value) {
@@ -637,6 +759,11 @@ function setAuth(token, user) {
 
 function setLoggedOut() {
   setAuth(null, null)
+  state.search = ''
+  state.date = null
+  if (rosterSearch) rosterSearch.value = ''
+  if (searchClear) searchClear.classList.add('hidden')
+  toggleRosterShell(false)
   if (loginPanel) loginPanel.classList.remove('hidden')
   if (appPanel) appPanel.classList.add('hidden')
   closeNavDrawer()
@@ -829,8 +956,8 @@ async function loadNotifications() {
     if (managerNotificationList) managerNotificationList.innerHTML = `<div class="hint">${msg}</div>`
   }
 }
-  if (!homebaseShiftStatus) return
-  if (!svModal || !revContent) return
+async function showRevModal() {
+  if (!svModal || !revContent || !revModal) return
   revContent.innerHTML = '<div class="hint">Loading revision history…</div>'
   revModal.classList.remove('hidden')
   revModal.style.pointerEvents = 'auto'
@@ -1123,6 +1250,7 @@ async function markSspRevoked() {
 
 function setView(view, options = {}) {
   debugLog('VIEW', `setView("${view}")`, options)
+  initViewHost()
   state.view = view
   if (view === 'roster' && state.locationId === 'all') {
     const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
@@ -1132,12 +1260,12 @@ function setView(view, options = {}) {
       localStorage.setItem(locationPrefKey, first.id)
     }
   }
-  const views = ["roster","uploads","reports","observations","staff","intakes","locations","activity","notifications","announcer"]
-  for (const v of views) {
-    const panel = el("view" + v[0].toUpperCase() + v.slice(1))
-    if (panel) panel.classList.toggle("hidden", v !== view)
+  mountView(view)
+  if (view !== 'roster') {
+    timeBlocksExpanded = false
+    if (timeBlocks) timeBlocks.classList.add('hidden')
   }
-document.querySelectorAll('.navItem').forEach((btn) => {
+  document.querySelectorAll('.navItem').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.view === view)
   })
   closeGearMenu()
@@ -1148,7 +1276,7 @@ document.querySelectorAll('.navItem').forEach((btn) => {
 
 function applySubtab(view) {
   const subtab = state.subtabs[view]
-  const panel = el("view" + view[0].toUpperCase() + view.slice(1))
+  const panel = getViewNode(view)
   if (!panel) return
   panel.querySelectorAll('[data-subtab]').forEach((node) => {
     const match = node.dataset.subtab === subtab
@@ -1348,52 +1476,36 @@ function getLocationTimeZone() {
   return loc?.timezone || loc?.time_zone || loc?.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
+function toggleRosterShell(hasContext) {
+  const hide = !hasContext
+  if (timeBlockCard) timeBlockCard.classList.toggle('hidden', hide)
+  if (rosterTableCard) rosterTableCard.classList.toggle('hidden', hide)
+  if (rosterUploadCard) {
+    if (hide) {
+      rosterUploadCard.classList.add('hidden')
+    } else if (getEffectiveRoleKey() === 'admin' || getEffectiveRoleKey() === 'manager') {
+      rosterUploadCard.classList.remove('hidden')
+    }
+  }
+}
+
 function applyLocationFeatures() {
   const loc = state.locations.find((l) => l.id === state.locationId)
   const features = getLocationFeatures(loc)
   const role = getEffectiveRoleKey()
 
-  const rosterTab = document.querySelector('.navItem[data-view="roster"]')
-  const uploadsTab = document.querySelector('.navItem[data-view="uploads"]')
-  const reportsTab = document.querySelector('.navItem[data-view="reports"]')
-  const staffTab = document.querySelector('.navItem[data-view="staff"]')
-  const intakesTab = document.querySelector('.navItem[data-view="intakes"]')
-  const observationsTab = document.querySelector('.navItem[data-view="observations"]')
-  const locationsTab = document.querySelector('.navItem[data-view="locations"]')
-  const announcerTabEl = document.querySelector('.navItem[data-view="announcer"]')
-  const activityTabEl = document.querySelector('.navItem[data-view="activity"]')
-  const notificationsTabEl = document.querySelector('.navItem[data-view="notifications"]')
-
   const rosterOnly = features.roster_enabled && !features.announcer_enabled && !features.reports_enabled && !features.observations_enabled
 
-  const roleGated = {
-    uploads: role === 'admin' || role === 'manager',
-    reports: role === 'admin' || role === 'manager',
-    staff: role === 'admin' || role === 'manager',
-    intakes: role === 'admin' || role === 'manager',
-    observations: role !== 'readonly',
-    locations: role === 'admin'
-  }
+  buildNavMenu()
+  renderGearLinks()
 
-  if (rosterTab) rosterTab.classList.toggle("hidden", !features.roster_enabled)
-  if (uploadsTab) uploadsTab.classList.toggle("hidden", rosterOnly || !roleGated.uploads)
-  if (reportsTab) reportsTab.classList.toggle("hidden", !features.reports_enabled || !roleGated.reports)
-  if (staffTab) staffTab.classList.toggle("hidden", rosterOnly || !roleGated.staff)
-  if (intakesTab) intakesTab.classList.toggle("hidden", rosterOnly || !roleGated.intakes)
-  if (observationsTab) observationsTab.classList.toggle("hidden", !features.observations_enabled || !roleGated.observations)
-  if (locationsTab) {
-    const isAdmin = getEffectiveRoleKey() === 'admin'
-    locationsTab.classList.toggle("hidden", rosterOnly || !roleGated.locations || !isAdmin)
-  }
-  if (announcerTabEl) announcerTabEl.classList.toggle("hidden", !features.announcer_enabled)
-  if (activityTabEl) activityTabEl.classList.toggle("hidden", role !== "admin")
-  if (notificationsTabEl) notificationsTabEl.classList.toggle("hidden", !(role === "admin" || role === "manager" || role === "instructor"))
-  if (eodCloseCard) eodCloseCard.classList.toggle("hidden", !(role === "admin" || role === "manager"))
-  if (integrationStatusCard) integrationStatusCard.classList.toggle("hidden", role !== "admin")
-
-  if (rosterOnly && state.view !== "roster") setView("roster")
+  const navViews = navList ? Array.from(navList.querySelectorAll('.navItem')).map((btn) => btn.dataset.view) : []
+  if (!navViews.includes(state.view)) setView("roster")
   if (!features.announcer_enabled && state.view === "announcer") setView("roster")
   if (!features.observations_enabled && state.view === "observations") setView("roster")
+  if (eodCloseCard) eodCloseCard.classList.toggle("hidden", !(role === "admin" || role === "manager"))
+  if (integrationStatusCard) integrationStatusCard.classList.toggle("hidden", role !== "admin")
+  if (rosterOnly && state.view !== "roster") setView("roster")
 }
 
 function applyRoleUi() {
@@ -1441,7 +1553,7 @@ async function checkAutoAdvance() {
   if (state.view !== 'roster') return
   if (!state.selectedBlock || !state.date) return
   const tz = getLocationTimeZone()
-  const classes = Array.isArray(state.classInstances) ? state.classInstances : []
+  const classes = uniqueClassTimes(Array.isArray(state.classInstances) ? state.classInstances : [])
   const current = classes.find((c) => c.start_time == state.selectedBlock)
   if (!current || !current.end_time) return
   const end = parseDateTimeInTz(state.date, current.end_time, tz)
@@ -1475,6 +1587,7 @@ async function loadRosterEntries() {
   if (!state.locationId || !state.date || state.locationId === 'all') {
     state.rosterEntries = []
     state.filteredEntries = []
+    toggleRosterShell(false)
     if (rosterTable) rosterTable.innerHTML = ''
     if (rosterEmpty) {
       rosterEmpty.textContent = state.locationId === 'all'
@@ -1484,6 +1597,7 @@ async function loadRosterEntries() {
     }
     return
   }
+  toggleRosterShell(true)
   const endpoint = state.rosterMode === 'mine' ? '/roster-entries/mine' : '/roster-entries'
   try {
     const data = await apiFetch(`${endpoint}?locationId=${state.locationId}&date=${state.date}`)
@@ -1519,6 +1633,25 @@ function parseDateTimeInTz(dateStr, timeStr, tz) {
   return local
 }
 
+function uniqueClassTimes(list) {
+  const seen = new Set()
+  const cleaned = []
+  list.forEach((c) => {
+    if (!c || !c.start_time) return
+    if (seen.has(c.start_time)) {
+      const idx = cleaned.findIndex((row) => row.start_time === c.start_time)
+      if (idx >= 0 && !cleaned[idx].end_time && c.end_time) {
+        cleaned[idx] = c
+      }
+      return
+    }
+    seen.add(c.start_time)
+    cleaned.push(c)
+  })
+  cleaned.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
+  return cleaned
+}
+
 function getSelectedClassInstance() {
   const classes = Array.isArray(state.classInstances) ? state.classInstances : []
   if (!classes.length) return null
@@ -1534,33 +1667,49 @@ function updateClassNoteButton() {
 
 function buildTimeBlocks() {
   // Guard: Only build time blocks when on roster view and elements exist
-  if (state.view !== 'roster') {
-    return
-  }
-  if (!timeActive && !timeBlocks && !timeBlockSelect) {
+  if (state.view !== 'roster') return
+  if (!timeActive && !timeBlocks && !timePillToggle) return
+
+  const hasContext = state.locationId && state.date && state.locationId !== 'all'
+  if (!hasContext) {
+    if (timeActive) timeActive.textContent = 'Select a location and date.'
+    if (timeSelectedLabel) timeSelectedLabel.textContent = 'None'
+    if (timeBlocks) { timeBlocks.innerHTML = ''; timeBlocks.classList.add('hidden') }
+    timeBlocksExpanded = false
+    if (timePillToggle) timePillToggle.disabled = true
     return
   }
 
-  if (state.locationId === 'all') {
-    if (timeActive) timeActive.textContent = 'Global view: time blocks disabled.'
-    if (timeBlocks) timeBlocks.classList.add('hidden')
-    if (timeBlockSelect) {
-      timeBlockSelect.innerHTML = ''
-      timeBlockSelect.disabled = true
+  if (timePillToggle) timePillToggle.disabled = false
+
+  let classes = Array.isArray(state.classInstances) ? state.classInstances.slice() : []
+  const isWeekend = (() => {
+    try {
+      const d = new Date(state.date)
+      return d.getDay() === 0 || d.getDay() === 6
+    } catch (e) {
+      return false
     }
-    return
+  })()
+  if (isWeekend && state.locationId && state.locationId !== 'all') {
+    classes = weekendTimeSlots.map((t) => {
+      const [hh, mm] = t.split(':').map((v) => parseInt(v, 10))
+      const end = new Date(0, 0, 0, hh, mm + 30)
+      const endStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
+      return { start_time: t, end_time: endStr, class_name: '' }
+    })
+    if (!state.selectedBlock || !classes.some((c) => c.start_time === state.selectedBlock)) {
+      state.selectedBlock = classes[0]?.start_time || null
+    }
   }
-  const classes = Array.isArray(state.classInstances) ? state.classInstances : []
-  const times = classes.map((c) => c.start_time).filter(Boolean)
-  if (!times.length) {
+  classes = uniqueClassTimes(classes)
+  if (!classes.length) {
     if (timeActive) timeActive.textContent = 'No classes today.'
-    if (timeBlocks) timeBlocks.classList.add('hidden')
-    if (timeBlockSelect) {
-      timeBlockSelect.innerHTML = ''
-      timeBlockSelect.disabled = true
-    }
+    if (timeSelectedLabel) timeSelectedLabel.textContent = 'None'
+    if (timeBlocks) { timeBlocks.innerHTML = ''; timeBlocks.classList.add('hidden') }
     return
   }
+
   const tz = getLocationTimeZone()
   const now = nowInTimezone(tz)
 
@@ -1582,37 +1731,59 @@ function buildTimeBlocks() {
     active = classes.find((c) => c.start_time == state.selectedBlock) || active
   }
 
+  if (!state.selectedBlock || !classes.some((c) => c.start_time === state.selectedBlock)) {
+    state.selectedBlock = state.showAllTimes ? null : (active?.start_time || classes[0].start_time)
+  }
+
   if (state.showAllTimes) {
-    state.selectedBlock = null
     if (timeActive) timeActive.textContent = 'All times'
   } else {
-    state.selectedBlock = active ? active.start_time : null
-    if (timeActive) {
-      const endLabel = active?.end_time ? formatTime(active.end_time) : ''
-      const startLabel = active?.start_time ? formatTime(active.start_time) : ''
-      const label = startLabel ? `${startLabel}${endLabel && '–' + endLabel}` : ''
-      timeActive.textContent = `${label}${active?.class_name ? ' • ' + active.class_name : ''}` || 'No classes today.'
-    }
+    const endLabel = active?.end_time ? formatTime(active.end_time) : ''
+    const startLabel = active?.start_time ? formatTime(active.start_time) : ''
+    const label = startLabel ? `${startLabel}${endLabel && '–' + endLabel}` : ''
+    const extra = isWeekend ? ' ⚑' : (active?.class_name ? ' • ' + active.class_name : '')
+    if (timeActive) timeActive.textContent = label ? `${label}${extra}` : 'No classes today.'
   }
 
-  if (timeBlockSelect) {
-    timeBlockSelect.disabled = false
-    timeBlockSelect.innerHTML = ''
-    const allOpt = document.createElement('option')
-    allOpt.value = 'all'
-    allOpt.textContent = 'All times'
-    timeBlockSelect.appendChild(allOpt)
-    classes.forEach((c) => {
-      const opt = document.createElement('option')
-      opt.value = c.start_time
-      opt.textContent = `${formatTime(c.start_time)} ${c.class_name || ''}`.trim()
-      timeBlockSelect.appendChild(opt)
+  if (timeSelectedLabel) {
+    timeSelectedLabel.textContent = state.showAllTimes
+      ? 'All'
+      : (state.selectedBlock ? formatTime(state.selectedBlock) : 'None')
+  }
+
+  if (timeBlocks) {
+    timeBlocks.innerHTML = ''
+    const allBtn = document.createElement('button')
+    allBtn.className = 'secondary miniBtn'
+    allBtn.textContent = 'All times'
+    allBtn.classList.toggle('active', state.showAllTimes)
+    allBtn.addEventListener('click', () => {
+      state.showAllTimes = true
+      state.manualOverride = true
+      state.selectedBlock = null
+      timeBlocksExpanded = false
+      buildTimeBlocks()
+      applyFilters()
     })
-    timeBlockSelect.value = state.showAllTimes ? 'all' : (state.selectedBlock || 'all')
+    timeBlocks.appendChild(allBtn)
+    classes.forEach((c) => {
+      const btn = document.createElement('button')
+      btn.className = 'secondary miniBtn'
+      btn.textContent = formatTime(c.start_time)
+      if (c.class_name) btn.title = c.class_name
+      btn.classList.toggle('active', !state.showAllTimes && state.selectedBlock === c.start_time)
+      btn.addEventListener('click', () => {
+        state.selectedBlock = c.start_time
+        state.showAllTimes = false
+        state.manualOverride = true
+        timeBlocksExpanded = false
+        buildTimeBlocks()
+        applyFilters()
+      })
+      timeBlocks.appendChild(btn)
+    })
+    timeBlocks.classList.toggle('hidden', !timeBlocksExpanded)
   }
-
-  if (timeBlocks) timeBlocks.classList.add('hidden')
-  if (timeBlockToggle) timeBlockToggle.classList.add('hidden')
 }
 
 
@@ -2015,7 +2186,12 @@ function renderRoster() {
   if (!rosterTable) return
   rosterTable.innerHTML = ''
   if (!state.filteredEntries.length) {
-    rosterEmpty.classList.remove('hidden')
+    if (rosterEmpty) {
+      rosterEmpty.textContent = state.selectedBlock
+        ? 'No swimmers for this time block.'
+        : 'No swimmers match the current filters.'
+      rosterEmpty.classList.remove('hidden')
+    }
     return
   }
   rosterEmpty.classList.add('hidden')
@@ -2119,7 +2295,7 @@ function renderRoster() {
     const zoneCell = document.createElement('td')
     zoneCell.className = 'col-zone'
     zoneCell.dataset.label = 'Zone'
-    zoneCell.textContent = entry.zone ? `Zone ${entry.zone}` : '—'
+    zoneCell.textContent = entry.zone ? `Zone ${entry.zone}` : 'Unassigned'
 
     const notesCell = document.createElement('td')
     notesCell.className = 'col-notes'
@@ -2662,6 +2838,87 @@ function renderBillingTickets(tickets) {
     item.appendChild(saveBtn)
     billingQueueList.appendChild(item)
   })
+}
+
+
+function populateBillingAssignees(selectedId = '') {
+  if (!billingAssigneeSelect) return
+  const staff = Array.isArray(state.staff) ? state.staff : []
+  billingAssigneeSelect.innerHTML = ''
+  const none = document.createElement('option')
+  none.value = ''
+  none.textContent = 'Unassigned'
+  billingAssigneeSelect.appendChild(none)
+  staff.forEach((s) => {
+    const opt = document.createElement('option')
+    opt.value = s.id
+    opt.textContent = `${s.first_name || ''} ${s.last_name || ''}`.trim()
+    if (selectedId && selectedId === s.id) opt.selected = true
+    billingAssigneeSelect.appendChild(opt)
+  })
+}
+
+async function openBillingModal(initial = {}) {
+  if (!billingModal) return
+  if (!state.locationId) {
+    alert('Select a location first.')
+    return
+  }
+  if (!state.staff || !state.staff.length) {
+    try { await loadStaff() } catch {}
+  }
+  billingDraft = {
+    locationId: state.locationId,
+    contactId: initial.contactId || initial.contact_id || null,
+    childExternalId: initial.childExternalId || initial.child_external_id || null,
+    priority: initial.priority || 'med',
+    status: initial.status || 'open',
+    assignedToUserId: initial.assignedToUserId || initial.assigned_to_user_id || ''
+  }
+  if (billingReasonInput) billingReasonInput.value = initial.reason || ''
+  if (billingNotesInput) billingNotesInput.value = initial.internalNotes || initial.notes || ''
+  if (billingPrioritySelect) billingPrioritySelect.value = billingDraft.priority
+  if (billingStatusSelect) billingStatusSelect.value = billingDraft.status
+  populateBillingAssignees(billingDraft.assignedToUserId || '')
+  billingModal.classList.remove('hidden')
+  billingModal.style.pointerEvents = 'auto'
+  if (billingReasonInput) billingReasonInput.focus()
+}
+
+function closeBillingModal() {
+  if (!billingModal) return
+  billingModal.classList.add('hidden')
+  billingModal.style.pointerEvents = 'none'
+  billingDraft = null
+}
+
+async function saveBillingModal() {
+  if (!billingModal) return
+  if (!state.locationId) {
+    alert('Select a location first.')
+    return
+  }
+  const body = {
+    locationId: state.locationId,
+    contactId: billingDraft?.contactId || null,
+    childExternalId: billingDraft?.childExternalId || null,
+    status: billingStatusSelect?.value || 'open',
+    priority: billingPrioritySelect?.value || 'med',
+    assignedToUserId: billingAssigneeSelect?.value || null,
+    reason: billingReasonInput?.value || null,
+    internalNotes: billingNotesInput?.value || null
+  }
+  const originalText = billingSaveBtn ? billingSaveBtn.textContent : null
+  if (billingSaveBtn) { billingSaveBtn.textContent = 'Saving…'; billingSaveBtn.disabled = true }
+  try {
+    await apiFetch('/billing/tickets', { method: 'POST', body: JSON.stringify(body) })
+    closeBillingModal()
+    loadBillingTickets()
+  } catch (err) {
+    alert(err?.error || 'Failed to create billing ticket.')
+  } finally {
+    if (billingSaveBtn) { billingSaveBtn.textContent = originalText || 'Create Ticket'; billingSaveBtn.disabled = false }
+  }
 }
 
 async function openBillingFlag(entry) {
@@ -3668,6 +3925,11 @@ locationSelect?.addEventListener('change', () => {
   state.manualOverride = false
   state.selectedBlock = null
   state.showAllTimes = false
+  timeBlocksExpanded = false
+  if (timeBlocks) timeBlocks.classList.add('hidden')
+  state.search = ''
+  if (rosterSearch) rosterSearch.value = ''
+  if (searchClear) searchClear.classList.add('hidden')
   if (state.view === 'roster' && state.locationId === 'all') {
     const first = (state.locations || []).find((loc) => loc.id && loc.id !== 'all')
     if (first) {
@@ -3716,6 +3978,8 @@ dateSelect?.addEventListener('change', () => {
   state.manualOverride = false
   state.selectedBlock = null
   state.showAllTimes = false
+  timeBlocksExpanded = false
+  if (timeBlocks) timeBlocks.classList.add('hidden')
   void loadRosterEntries()
   loadDayClosure()
   refreshAlerts()
@@ -3731,11 +3995,16 @@ rosterModeSelect?.addEventListener('change', () => {
 })
 
 todayBtn?.addEventListener('click', () => {
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayIsoInTz(getLocationTimeZone())
   state.date = today
   if (dateSelect) dateSelect.value = today
   updateContext()
   void loadRosterEntries()
+})
+
+timePillToggle?.addEventListener('click', () => {
+  timeBlocksExpanded = !timeBlocksExpanded
+  if (timeBlocks) timeBlocks.classList.toggle('hidden', !timeBlocksExpanded)
 })
 
 rosterSearch?.addEventListener('input', () => {
@@ -3764,20 +4033,6 @@ sortBy?.addEventListener('change', () => {
 
 instructorFilter?.addEventListener('change', () => {
   state.instructorFilter = instructorFilter.value
-  applyFilters()
-})
-
-timeBlockSelect?.addEventListener('change', () => {
-  const value = timeBlockSelect.value
-  state.manualOverride = true
-  if (value === 'all') {
-    state.showAllTimes = true
-    state.selectedBlock = null
-  } else {
-    state.showAllTimes = false
-    state.selectedBlock = value
-  }
-  buildTimeBlocks()
   applyFilters()
 })
 
@@ -3923,11 +4178,6 @@ function setUploadStatus(textValue) {
 
 function syncUploadConfirmState() {
   if (!uploadConfirmRun) return
-  const mode = uploadMergeMode?.value || 'merge'
-  if (pendingUploadIsDuplicate && mode !== 'replace') {
-    uploadConfirmRun.disabled = true
-    return
-  }
   uploadConfirmRun.disabled = false
 }
 
@@ -4020,16 +4270,6 @@ document.querySelectorAll('[data-subtab-link]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const sub = btn.dataset.subtabLink
     if (sub) setSubtab('reports', sub)
-  })
-})
-
-document.querySelectorAll('.navItem').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    const view = tab.dataset.view
-    setView(view)
-    if (state.subtabs[view]) setSubtab(view, state.subtabs[view])
-    activateView(view)
-    closeNavDrawer()
   })
 })
 
@@ -4249,6 +4489,7 @@ changePinSave?.addEventListener('click', async () => {
     if (state.user) state.user.mustChangePin = false
     if (changePinStatus) changePinStatus.textContent = 'Saved ✓'
     hideChangePinModal()
+    bootstrap().catch((err) => console.error('Bootstrap after PIN change failed', err))
   } catch (err) {
     if (changePinStatus) changePinStatus.textContent = err?.error || 'Save failed.'
   }
@@ -4264,6 +4505,10 @@ async function bootstrap() {
   updateFooterVersion()
   await loadMeta()
   if (userInfo) userInfo.textContent = state.user ? `${state.user.firstName || ''} ${state.user.lastName || ''} • ${getEffectiveRoleLabel()}` : ''
+  if (state.user && state.user.mustChangePin) {
+    showChangePinModal()
+    return
+  }
   await loadLocations()
   renderUserAdminLocations()
   applyQaControls()
@@ -4271,12 +4516,13 @@ async function bootstrap() {
   applyInstructorOverride()
   await loadAdminUsers()
   await loadIntegrationStatus()
-  if (state.user && state.user.mustChangePin) {
-    showChangePinModal()
-  }
 
-  state.date = new Date().toISOString().slice(0, 10)
+  const tz = getLocationTimeZone() || 'America/New_York'
+  state.date = todayIsoInTz(tz)
+  state.search = ''
   if (dateSelect) dateSelect.value = state.date
+  if (rosterSearch) rosterSearch.value = ''
+  if (searchClear) searchClear.classList.add('hidden')
   updateContext()
   ensureReportDates()
 

@@ -1,4 +1,4 @@
-\restrict 7TpxTx8FiNaCVmEJBCmbBa7ihUAqibGp6frTREZKmnqbJWE8WZOKfbUCVvqHvv4
+\restrict C8CgQlAug2eNR1RiQCzshIpamynXVeNyhDY3GmJ1tVHj4vWkea1c6wpw88EOFfB
 
 -- Dumped from database version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.11 (Ubuntu 16.11-0ubuntu0.24.04.1)
@@ -3069,7 +3069,7 @@ ALTER TABLE ONLY public.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 7TpxTx8FiNaCVmEJBCmbBa7ihUAqibGp6frTREZKmnqbJWE8WZOKfbUCVvqHvv4
+\unrestrict C8CgQlAug2eNR1RiQCzshIpamynXVeNyhDY3GmJ1tVHj4vWkea1c6wpw88EOFfB
 
 
 --
@@ -3108,4 +3108,5 @@ INSERT INTO public.schema_migrations (version) VALUES
     ('20260202120000'),
     ('20260202140000'),
     ('20260203120000'),
-    ('20260203121000');
+    ('20260203121000'),
+    ('20260205180000');

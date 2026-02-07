@@ -45,18 +45,7 @@
           <div class="appTitle">Menu</div>
           <button class="iconBtn" id="navCloseBtn">✕</button>
         </div>
-        <div class="drawerList">
-          <button class="navItem" data-view="roster">Roster</button>
-          <button class="navItem" data-view="uploads">Uploads</button>
-          <button class="navItem" data-view="reports">Reports</button>
-          <button class="navItem" data-view="observations">Observations</button>
-          <button class="navItem" data-view="staff">Staff</button>
-          <button class="navItem" data-view="intakes">Intakes</button>
-          <button class="navItem" data-view="locations">Locations</button>
-          <button class="navItem" data-view="activity" id="activityNav">Activity</button>
-          <button class="navItem" data-view="notifications" id="notificationsNav">Notifications</button>
-          <button class="navItem" data-view="announcer" id="announcerNav">Announcer</button>
-        </div>
+        <div class="drawerList" id="navList"></div>
       </div>
 
       <div id="gearMenu" class="menu hidden">
@@ -90,11 +79,18 @@
           </div>
           <div class="hint" id="integrationStatus"></div>
         </div>
+        <div class="menuSection adminOnly" id="gearAdminLinks">
+          <button class="secondary" data-gear-nav="staff" type="button">Staff management</button>
+          <button class="secondary" data-gear-nav="intakes" type="button">Intakes configuration</button>
+          <button class="secondary" data-gear-nav="locations" type="button">Location management</button>
+          <button class="secondary" data-gear-nav="uploads" type="button">Integrations status & uploads</button>
+        </div>
         <div class="menuSection">
           <button class="secondary" id="logoutBtn">Log out</button>
         </div>
       </div>
 
+<div id="viewHost">
 <section id="viewRoster" class="hidden">
         <div class="tabs page-tabs" id="rosterTabs">
           <button class="tab" data-subtab-btn="main">Roster</button>
@@ -156,16 +152,14 @@
           <div class="pill">Time Blocks</div>
           <div class="pill" id="homebaseShiftStatus">On shift: —</div>
           <div class="spacer"></div>
-          <label class="tiny">Time
-            <select id="timeBlockSelect" class="compact"></select>
-          </label>
+          <button class="secondary miniBtn" id="timePillToggle" type="button">Selected: <span id="timeSelectedLabel">None</span></button>
         </div>
           <div id="timeActive" class="time-active">No class selected</div>
-          <div id="timeBlocks" class="blocks hidden"></div>
+          <div id="timeBlocks" class="blocks hidden" aria-live="polite"></div>
           <div class="hint" id="timeBlockStatus"></div>
         </div>
 
-        <div class="card">
+        <div class="card" id="rosterTableCard">
           <div class="row rosterToolbar">
             <div class="pill">Roster <span id="rosterMeta" class="muted tiny"></span></div>
           </div>
@@ -846,8 +840,9 @@
           </div>
           <div class="hint">Announcer controls are enabled for Westchester only. Audio routing is handled on the server.</div>
         </div>
-      </div>
+        </div>
       </section>
+    </div>
     </div>
     </div>
 
