@@ -3522,10 +3522,11 @@ app.post('/attendance/bulk', async (req, reply) => {
   const sess = (req as any).session as { user_id: string }
   const roleOk = await requireAnyRole(sess.user_id, ['admin','manager','instructor'])
   if (!roleOk) return reply.code(403).send({ error: 'role_forbidden' })
-  const body = req.body as { locationId?: string; date?: string; start_time?: string; attendance?: number | null }
+  const body = req.body as { locationId?: string; date?: string; start_time?: string; class_name?: string; className?: string; attendance?: number | null }
   const locationId = body.locationId
   const date = body.date
   const startTime = body.start_time
+  const className = body.class_name || body.className
   if (!locationId || !date || !startTime) return reply.code(400).send({ error: 'locationId_date_start_time_required' })
 
   const hasAccess = await requireLocationAccess(sess.user_id, locationId)
@@ -3534,14 +3535,21 @@ app.post('/attendance/bulk', async (req, reply) => {
   const att = body.attendance === 0 ? 0 : body.attendance === 1 ? 1 : null
   const attendanceAt = att === 0 || att === 1 ? new Date() : null
 
+  const params: any[] = [att, attendanceAt, att === null ? null : sess.user_id, locationId, date, startTime]
+  let where = 'location_id=$4 AND class_date=$5 AND start_time=$6'
+  if (className) {
+    params.push(className)
+    where += ` AND class_name=$${params.length}`
+  }
+
   const res = await pool.query(
     `UPDATE roster_entries
      SET attendance=$1, attendance_at=$2, attendance_marked_by_user_id=$3
-     WHERE location_id=$4 AND class_date=$5 AND start_time=$6`,
-    [att, attendanceAt, att === null ? null : sess.user_id, locationId, date, startTime]
+     WHERE ${where}`,
+    params
   )
 
-  await logAuditEvent(locationId, sess.user_id, 'attendance_bulk', 'class_block', null, { attendance: att, date, startTime })
+  await logAuditEvent(locationId, sess.user_id, 'attendance_bulk', 'class_block', null, { attendance: att, date, startTime, className })
 
   return { ok: true, updated: res.rowCount }
 })

@@ -178,6 +178,23 @@ select{
 
 .blocks{ display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
 .blocks button{ min-width: 110px; }
+.blocks button.time-block-btn{
+  text-align: left;
+  min-width: 240px;
+  flex: 1 1 260px;
+  padding: 6px 10px;
+  line-height: 1.2;
+}
+.blocks button.time-block-btn .time-block-main{
+  font-weight: 800;
+  font-size: 12px;
+}
+.blocks button.time-block-btn .time-block-sub{
+  margin-top: 2px;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--muted);
+}
 .blocks button.active{
   outline:2px solid rgba(255,255,255,.18);
   border-color: rgba(255,255,255,.28);

@@ -8,7 +8,7 @@ const state = {
   rosterMode: 'mine',
   rosterEntries: [],
   filteredEntries: [],
-  selectedBlock: null,
+  selectedClassKey: null,
   manualOverride: false,
   showAllTimes: false,
   instructorFilter: 'all',
@@ -771,6 +771,9 @@ function setLoggedOut() {
   setAuth(null, null)
   state.search = ''
   state.date = null
+  state.selectedClassKey = null
+  state.manualOverride = false
+  state.showAllTimes = false
   if (rosterSearch) rosterSearch.value = ''
   if (searchClear) searchClear.classList.add('hidden')
   toggleRosterShell(false)
@@ -1564,21 +1567,32 @@ function renderEodSummary() {
 
 async function checkAutoAdvance() {
   if (state.view !== 'roster') return
-  if (!state.selectedBlock || !state.date) return
+  if (!state.selectedClassKey || !state.date || state.showAllTimes) return
   const tz = getLocationTimeZone()
-  const classes = uniqueClassTimes(Array.isArray(state.classInstances) ? state.classInstances : [])
-  const current = classes.find((c) => c.start_time == state.selectedBlock)
+  const classes = sortClassInstances(Array.isArray(state.classInstances) ? state.classInstances.slice() : [])
+  if (!classes.length) return
+  const current = classes.find((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey)
   if (!current || !current.end_time) return
   const end = parseDateTimeInTz(state.date, current.end_time, tz)
   const threshold = new Date(end.getTime() - 3 * 60 * 1000)
   const now = nowInTimezone(tz)
   if (now >= threshold) {
-    const idx = classes.findIndex((c) => c.start_time == state.selectedBlock)
-    const next = classes[idx + 1]
+    const currentTimeKey = normalizeTimeKey(current.start_time)
+    const seenTimes = new Set()
+    const times = []
+    classes.forEach((c) => {
+      const timeKey = normalizeTimeKey(c?.start_time)
+      if (!timeKey || seenTimes.has(timeKey)) return
+      seenTimes.add(timeKey)
+      times.push(timeKey)
+    })
+    const idx = times.indexOf(currentTimeKey)
+    const nextTimeKey = idx >= 0 ? times[idx + 1] : null
+    const next = nextTimeKey ? classes.find((c) => normalizeTimeKey(c?.start_time) === nextTimeKey) : null
     if (next) {
       state.manualOverride = false
       state.showAllTimes = false
-      state.selectedBlock = next.start_time
+      state.selectedClassKey = getClassKeyFromClassInstance(next)
       buildTimeBlocks()
       applyFilters()
     } else {
@@ -1626,6 +1640,7 @@ async function loadRosterEntries() {
     }
   }
   await loadClassInstances()
+  attachRosterEntryClassKeys()
   buildTimeBlocks()
   buildInstructorFilter()
   applyFilters()
@@ -1646,36 +1661,227 @@ function parseDateTimeInTz(dateStr, timeStr, tz) {
   return local
 }
 
-function uniqueClassTimes(list) {
-  const seen = new Set()
-  const cleaned = []
-  list.forEach((c) => {
-    if (!c || !c.start_time) return
-    if (seen.has(c.start_time)) {
-      const idx = cleaned.findIndex((row) => row.start_time === c.start_time)
-      if (idx >= 0 && !cleaned[idx].end_time && c.end_time) {
-        cleaned[idx] = c
-      }
-      return
-    }
-    seen.add(c.start_time)
-    cleaned.push(c)
+function normalizeTimeKey(value) {
+  if (!value) return ''
+  const parts = String(value).split(':')
+  if (parts.length < 2) return String(value)
+  return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`
+}
+
+function fnv1a32(input) {
+  const str = String(input || '')
+  let hash = 0x811c9dc5
+  for (let i = 0; i < str.length; i += 1) {
+    hash ^= str.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return hash >>> 0
+}
+
+function stableHash(input) {
+  return fnv1a32(input).toString(36)
+}
+
+function buildStableClassKey({ locationId, date, startTime, program, level, instructor, zone }) {
+  const parts = [
+    String(locationId || ''),
+    String(date || ''),
+    normalizeTimeKey(startTime),
+    String(program || ''),
+    String(level || ''),
+    String(instructor || ''),
+    zone === null || zone === undefined ? '' : String(zone)
+  ]
+  return `h_${stableHash(parts.join('|'))}`
+}
+
+function getClassKeyFromClassInstance(cls) {
+  if (!cls) return null
+  if (cls.class_key) return cls.class_key
+  if (cls.id) {
+    cls.class_key = String(cls.id)
+    return cls.class_key
+  }
+  const instructor = normalizeInstructorName(cls.actual_instructor || cls.scheduled_instructor || cls.instructor_name || '')
+  cls.class_key = buildStableClassKey({
+    locationId: state.locationId || cls.location_id || '',
+    date: state.date || cls.class_date || '',
+    startTime: cls.start_time || '',
+    program: cls.program || '',
+    level: cls.level || '',
+    instructor: instructor || '',
+    zone: cls.zone
   })
-  cleaned.sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''))
-  return cleaned
+  return cls.class_key
+}
+
+function buildClassInstanceKeyIndex(classes) {
+  const index = new Map()
+  ;(Array.isArray(classes) ? classes : []).forEach((cls) => {
+    if (!cls) return
+    const timeKey = normalizeTimeKey(cls.start_time)
+    if (!timeKey) return
+    const nameKey = String(cls.class_name || '').trim().toLowerCase()
+    const key = `${timeKey}|${nameKey}`
+    if (index.has(key)) return
+    index.set(key, getClassKeyFromClassInstance(cls))
+  })
+  return index
+}
+
+function buildClassInstancesByTimeKey(classes) {
+  const byTime = new Map()
+  ;(Array.isArray(classes) ? classes : []).forEach((cls) => {
+    if (!cls) return
+    const timeKey = normalizeTimeKey(cls.start_time)
+    if (!timeKey) return
+    const list = byTime.get(timeKey) || []
+    list.push(cls)
+    byTime.set(timeKey, list)
+  })
+  return byTime
+}
+
+function getClassKeyForRosterEntry(entry, classIndex, classesByTime) {
+  if (!entry) return null
+  const timeKey = normalizeTimeKey(entry.start_time)
+  const nameKey = String(entry.class_name || '').trim().toLowerCase()
+  const lookupKey = `${timeKey}|${nameKey}`
+  const fromIndex = classIndex ? classIndex.get(lookupKey) : null
+  if (fromIndex) return fromIndex
+
+  const candidates = (classesByTime && timeKey) ? (classesByTime.get(timeKey) || []) : []
+  if (candidates.length === 1) {
+    return getClassKeyFromClassInstance(candidates[0])
+  }
+  if (candidates.length > 1) {
+    const entryInstructor = normalizeInstructorName(entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || '')
+    if (entryInstructor) {
+      const matches = candidates.filter((c) => {
+        const scheduled = normalizeInstructorName(c?.scheduled_instructor || '')
+        const actual = normalizeInstructorName(c?.actual_instructor || '')
+        const combined = actual || scheduled
+        return combined && combined === entryInstructor
+      })
+      if (matches.length === 1) return getClassKeyFromClassInstance(matches[0])
+    }
+  }
+
+  const instructor = normalizeInstructorName(entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || '')
+  return buildStableClassKey({
+    locationId: entry.location_id || state.locationId || '',
+    date: entry.class_date || state.date || '',
+    startTime: entry.start_time || '',
+    program: entry.program || '',
+    level: entry.level || '',
+    instructor: instructor || '',
+    zone: entry.zone
+  })
+}
+
+function attachRosterEntryClassKeys() {
+  const classes = Array.isArray(state.classInstances) ? state.classInstances : []
+  const index = buildClassInstanceKeyIndex(classes)
+  const byTime = buildClassInstancesByTimeKey(classes)
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+  rosterEntries.forEach((entry) => {
+    entry.class_key = getClassKeyForRosterEntry(entry, index, byTime)
+  })
+}
+
+function sortClassInstances(list) {
+  const items = Array.isArray(list) ? list : []
+  items.sort((a, b) => {
+    const ta = normalizeTimeKey(a?.start_time)
+    const tb = normalizeTimeKey(b?.start_time)
+    if (ta !== tb) return String(ta || '').localeCompare(String(tb || ''))
+    const an = String(a?.class_name || '').localeCompare(String(b?.class_name || ''))
+    if (an) return an
+    const ai = String(a?.actual_instructor || a?.scheduled_instructor || '').localeCompare(String(b?.actual_instructor || b?.scheduled_instructor || ''))
+    return ai
+  })
+  return items
 }
 
 function getSelectedClassInstance() {
   const classes = Array.isArray(state.classInstances) ? state.classInstances : []
   if (!classes.length) return null
-  const match = classes.find((c) => c.start_time === state.selectedBlock)
-  return match || classes[0] || null
+  if (state.selectedClassKey) {
+    const match = classes.find((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey)
+    if (match) return match
+  }
+  return classes[0] || null
 }
 
 function updateClassNoteButton() {
   if (!classNoteBtn) return
   const cls = getSelectedClassInstance()
   classNoteBtn.disabled = !cls
+}
+
+function buildClassMetaIndexFromRosterEntries() {
+  const index = new Map()
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
+  rosterEntries.forEach((entry) => {
+    const key = entry?.class_key
+    if (!key) return
+    const meta = index.get(key) || { program: '', level: '', instructor: '', zone: null }
+    if (!meta.program && entry.program) meta.program = entry.program
+    if (!meta.level && entry.level) meta.level = entry.level
+    if (!meta.instructor) {
+      const raw = entry.actual_instructor || entry.scheduled_instructor || entry.instructor_name || ''
+      const normalized = normalizeInstructorName(raw)
+      if (normalized) meta.instructor = normalized
+    }
+    if (meta.zone === null || meta.zone === undefined) {
+      if (entry.zone !== null && entry.zone !== undefined) meta.zone = entry.zone
+    }
+    index.set(key, meta)
+  })
+  return index
+}
+
+function formatClassTimeRange(cls) {
+  const start = cls?.start_time ? formatTime(cls.start_time) : ''
+  const end = cls?.end_time ? formatTime(cls.end_time) : ''
+  if (start && end) return `${start}–${end}`
+  return start || ''
+}
+
+function getClassDisplayLines(cls, metaIndex) {
+  const key = getClassKeyFromClassInstance(cls)
+  const meta = (metaIndex && key) ? (metaIndex.get(key) || {}) : {}
+
+  const program = meta.program || cls?.program || cls?.class_name || ''
+  const level = meta.level || cls?.level || ''
+  const timeRange = formatClassTimeRange(cls)
+
+  const scheduled = normalizeInstructorName(cls?.scheduled_instructor || '')
+  const actual = normalizeInstructorName(cls?.actual_instructor || '')
+  const isSub = Boolean(cls?.is_sub) && scheduled && actual && actual !== scheduled
+
+  const instructor = meta.instructor || actual || scheduled || ''
+  const zone = meta.zone !== undefined && meta.zone !== null ? meta.zone : (cls?.zone !== undefined ? cls.zone : null)
+
+  const mainParts = [timeRange, program, level].filter(Boolean)
+  const main = mainParts.join(' • ')
+
+  const subParts = []
+  if (instructor) subParts.push(instructor)
+  if (typeof zone === 'number' && zone) subParts.push(`Zone ${zone}`)
+  if (isSub) subParts.push(`Subbing for ${scheduled}`)
+  const sub = subParts.filter(Boolean).join(' • ')
+
+  const shortParts = []
+  if (program) shortParts.push(program)
+  if (level) shortParts.push(level)
+
+  return {
+    key,
+    main: main || timeRange || 'Class',
+    sub,
+    short: shortParts.join(' ')
+  }
 }
 
 function buildTimeBlocks() {
@@ -1690,11 +1896,16 @@ function buildTimeBlocks() {
     if (timeBlocks) { timeBlocks.innerHTML = ''; timeBlocks.classList.add('hidden') }
     timeBlocksExpanded = false
     if (timePillToggle) timePillToggle.disabled = true
+    state.selectedClassKey = null
+    state.showAllTimes = false
+    if (timeBlockStatus) timeBlockStatus.textContent = ''
+    updateClassNoteButton()
     return
   }
 
   if (timePillToggle) timePillToggle.disabled = false
 
+  const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
   let classes = Array.isArray(state.classInstances) ? state.classInstances.slice() : []
   const isWeekend = (() => {
     try {
@@ -1704,25 +1915,40 @@ function buildTimeBlocks() {
       return false
     }
   })()
-  if (isWeekend && state.locationId && state.locationId !== 'all') {
+  if (isWeekend && state.locationId && state.locationId !== 'all' && !classes.length) {
     classes = weekendTimeSlots.map((t) => {
       const [hh, mm] = t.split(':').map((v) => parseInt(v, 10))
       const end = new Date(0, 0, 0, hh, mm + 30)
       const endStr = `${String(end.getHours()).padStart(2, '0')}:${String(end.getMinutes()).padStart(2, '0')}`
-      return { start_time: t, end_time: endStr, class_name: '' }
+      return { start_time: t, end_time: endStr, class_name: '', is_placeholder: true }
     })
-    if (!state.selectedBlock || !classes.some((c) => c.start_time === state.selectedBlock)) {
-      state.selectedBlock = classes[0]?.start_time || null
-    }
   }
-  classes = uniqueClassTimes(classes)
+
+  classes.forEach((c) => getClassKeyFromClassInstance(c))
+  classes = sortClassInstances(classes)
+  {
+    const seen = new Set()
+    classes = classes.filter((c) => {
+      const key = `${normalizeTimeKey(c?.start_time)}|${String(c?.class_name || '').trim()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
   if (!classes.length) {
-    if (timeActive) timeActive.textContent = 'No classes today.'
+    const msg = rosterEntries.length ? 'No classes today.' : 'No roster uploaded for this location/date.'
+    if (timeActive) timeActive.textContent = msg
     if (timeSelectedLabel) timeSelectedLabel.textContent = 'None'
     if (timeBlocks) { timeBlocks.innerHTML = ''; timeBlocks.classList.add('hidden') }
+    if (timeBlockStatus) timeBlockStatus.textContent = ''
+    state.selectedClassKey = null
+    state.showAllTimes = false
+    updateClassNoteButton()
     return
   }
 
+  const metaIndex = buildClassMetaIndexFromRosterEntries()
   const tz = getLocationTimeZone()
   const now = nowInTimezone(tz)
 
@@ -1740,28 +1966,35 @@ function buildTimeBlocks() {
     }) || classes[classes.length - 1]
   }
 
-  if (state.manualOverride && state.selectedBlock) {
-    active = classes.find((c) => c.start_time == state.selectedBlock) || active
-  }
+  const activeKey = active ? getClassKeyFromClassInstance(active) : null
+  const selectedValid = state.selectedClassKey && classes.some((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey)
 
-  if (!state.selectedBlock || !classes.some((c) => c.start_time === state.selectedBlock)) {
-    state.selectedBlock = state.showAllTimes ? null : (active?.start_time || classes[0].start_time)
+  if (state.showAllTimes) {
+    state.selectedClassKey = null
+  } else if (!(state.manualOverride && selectedValid)) {
+    state.selectedClassKey = activeKey || getClassKeyFromClassInstance(classes[0])
   }
 
   if (state.showAllTimes) {
     if (timeActive) timeActive.textContent = 'All times'
+    if (timeBlockStatus) timeBlockStatus.textContent = ''
   } else {
-    const endLabel = active?.end_time ? formatTime(active.end_time) : ''
-    const startLabel = active?.start_time ? formatTime(active.start_time) : ''
-    const label = startLabel ? `${startLabel}${endLabel && '–' + endLabel}` : ''
-    const extra = isWeekend ? ' ⚑' : (active?.class_name ? ' • ' + active.class_name : '')
-    if (timeActive) timeActive.textContent = label ? `${label}${extra}` : 'No classes today.'
+    const selectedCls = classes.find((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey) || classes[0] || null
+    const lines = selectedCls ? getClassDisplayLines(selectedCls, metaIndex) : null
+    if (timeActive) timeActive.textContent = lines?.main || 'No classes today.'
+    if (timeBlockStatus) timeBlockStatus.textContent = lines?.sub || ''
   }
 
   if (timeSelectedLabel) {
-    timeSelectedLabel.textContent = state.showAllTimes
-      ? 'All'
-      : (state.selectedBlock ? formatTime(state.selectedBlock) : 'None')
+    if (state.showAllTimes) {
+      timeSelectedLabel.textContent = 'All'
+    } else {
+      const selectedCls = classes.find((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey) || classes[0] || null
+      const lines = selectedCls ? getClassDisplayLines(selectedCls, metaIndex) : null
+      const startLabel = selectedCls?.start_time ? formatTime(selectedCls.start_time) : ''
+      const short = lines?.short ? ` · ${lines.short}` : ''
+      timeSelectedLabel.textContent = startLabel ? `${startLabel}${short}` : 'None'
+    }
   }
 
   if (timeBlocks) {
@@ -1773,20 +2006,31 @@ function buildTimeBlocks() {
     allBtn.addEventListener('click', () => {
       state.showAllTimes = true
       state.manualOverride = true
-      state.selectedBlock = null
+      state.selectedClassKey = null
       timeBlocksExpanded = false
       buildTimeBlocks()
       applyFilters()
     })
     timeBlocks.appendChild(allBtn)
     classes.forEach((c) => {
+      const key = getClassKeyFromClassInstance(c)
+      const lines = getClassDisplayLines(c, metaIndex)
       const btn = document.createElement('button')
-      btn.className = 'secondary miniBtn'
-      btn.textContent = formatTime(c.start_time)
-      if (c.class_name) btn.title = c.class_name
-      btn.classList.toggle('active', !state.showAllTimes && state.selectedBlock === c.start_time)
+      btn.className = 'secondary miniBtn time-block-btn'
+      btn.title = c.class_name || ''
+      btn.classList.toggle('active', !state.showAllTimes && state.selectedClassKey === key)
+      const main = document.createElement('div')
+      main.className = 'time-block-main'
+      main.textContent = lines.main
+      btn.appendChild(main)
+      if (lines.sub) {
+        const sub = document.createElement('div')
+        sub.className = 'time-block-sub'
+        sub.textContent = lines.sub
+        btn.appendChild(sub)
+      }
       btn.addEventListener('click', () => {
-        state.selectedBlock = c.start_time
+        state.selectedClassKey = key
         state.showAllTimes = false
         state.manualOverride = true
         timeBlocksExpanded = false
@@ -1797,6 +2041,7 @@ function buildTimeBlocks() {
     })
     timeBlocks.classList.toggle('hidden', !timeBlocksExpanded)
   }
+  updateClassNoteButton()
 }
 
 function buildAnnouncerBlocks() {
@@ -1810,7 +2055,17 @@ function buildAnnouncerBlocks() {
     return
   }
   announcerTimeToggle.disabled = false
-  let classes = uniqueClassTimes(Array.isArray(state.classInstances) ? state.classInstances : [])
+  const metaIndex = buildClassMetaIndexFromRosterEntries()
+  let classes = sortClassInstances(Array.isArray(state.classInstances) ? state.classInstances.slice() : [])
+  {
+    const seen = new Set()
+    classes = classes.filter((c) => {
+      const key = `${normalizeTimeKey(c?.start_time)}|${String(c?.class_name || '').trim()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
   if (!classes.length) {
     announcerBlocks.innerHTML = '<div class="hint">No classes today.</div>'
     announcerBlocks.classList.remove('hidden')
@@ -1823,7 +2078,7 @@ function buildAnnouncerBlocks() {
   allBtn.textContent = 'All times'
   allBtn.classList.toggle('active', state.showAllTimes)
   allBtn.addEventListener('click', () => {
-    state.selectedBlock = null
+    state.selectedClassKey = null
     state.showAllTimes = true
     announcerBlocksExpanded = false
     buildAnnouncerBlocks()
@@ -1831,12 +2086,23 @@ function buildAnnouncerBlocks() {
   })
   announcerBlocks.appendChild(allBtn)
   classes.forEach((c) => {
+    const key = getClassKeyFromClassInstance(c)
+    const lines = getClassDisplayLines(c, metaIndex)
     const btn = document.createElement('button')
-    btn.className = 'secondary miniBtn'
-    btn.textContent = formatTime(c.start_time)
-    btn.classList.toggle('active', !state.showAllTimes && state.selectedBlock === c.start_time)
+    btn.className = 'secondary miniBtn time-block-btn'
+    btn.classList.toggle('active', !state.showAllTimes && state.selectedClassKey === key)
+    const main = document.createElement('div')
+    main.className = 'time-block-main'
+    main.textContent = lines.main
+    btn.appendChild(main)
+    if (lines.sub) {
+      const sub = document.createElement('div')
+      sub.className = 'time-block-sub'
+      sub.textContent = lines.sub
+      btn.appendChild(sub)
+    }
     btn.addEventListener('click', () => {
-      state.selectedBlock = c.start_time
+      state.selectedClassKey = key
       state.showAllTimes = false
       announcerBlocksExpanded = false
       buildAnnouncerBlocks()
@@ -1845,7 +2111,15 @@ function buildAnnouncerBlocks() {
     announcerBlocks.appendChild(btn)
   })
   announcerBlocks.classList.toggle('hidden', !announcerBlocksExpanded)
-  announcerTimeSelected.textContent = state.showAllTimes ? 'All' : (state.selectedBlock ? formatTime(state.selectedBlock) : 'None')
+  if (state.showAllTimes) {
+    announcerTimeSelected.textContent = 'All'
+  } else {
+    const selectedCls = classes.find((c) => getClassKeyFromClassInstance(c) === state.selectedClassKey) || classes[0] || null
+    const lines = selectedCls ? getClassDisplayLines(selectedCls, metaIndex) : null
+    const startLabel = selectedCls?.start_time ? formatTime(selectedCls.start_time) : ''
+    const short = lines?.short ? ` · ${lines.short}` : ''
+    announcerTimeSelected.textContent = startLabel ? `${startLabel}${short}` : 'None'
+  }
 }
 
 
@@ -2016,11 +2290,11 @@ function buildInstructorFilter() {
 
 function applyFilters() {
   const search = (state.search || "").toLowerCase()
-  const selected = state.selectedBlock
+  const selected = state.showAllTimes ? null : state.selectedClassKey
   let filtered = Array.isArray(state.rosterEntries) ? state.rosterEntries.slice() : []
 
   if (selected) {
-    filtered = filtered.filter((r) => r.start_time === selected)
+    filtered = filtered.filter((r) => r.class_key === selected)
   }
   if (state.instructorFilter !== 'all') {
     filtered = filtered.filter((r) => {
@@ -2160,12 +2434,15 @@ async function loadObservationSwimmersFromRoster() {
   const cls = roster.find((c) => c.id === classId)
   if (!cls) return
 
-  obsRosterStatus.textContent = 'Loading roster swimmers…'
-  try {
-    const data = await apiFetch(`/roster-entries?locationId=${state.locationId}&date=${cls.class_date}`)
-    const swimmers = (data.entries || []).filter((e) => e.start_time === cls.start_time)
-    state.observationSwimmers = swimmers.map((s) => ({ name: s.swimmer_name, scores: {}, notes: '' }))
-    renderObservationSwimmers()
+	  obsRosterStatus.textContent = 'Loading roster swimmers…'
+	  try {
+	    const data = await apiFetch(`/roster-entries?locationId=${state.locationId}&date=${cls.class_date}`)
+	    const swimmers = (data.entries || []).filter((e) =>
+	      normalizeTimeKey(e.start_time) === normalizeTimeKey(cls.start_time)
+	      && String(e.class_name || '').trim() === String(cls.class_name || '').trim()
+	    )
+	    state.observationSwimmers = swimmers.map((s) => ({ name: s.swimmer_name, scores: {}, notes: '' }))
+	    renderObservationSwimmers()
 
     const scheduled = cls.scheduled_instructor || ''
     const actual = cls.actual_instructor || ''
@@ -2249,9 +2526,13 @@ function renderRoster() {
   rosterTable.innerHTML = ''
   if (!state.filteredEntries.length) {
     if (rosterEmpty) {
-      rosterEmpty.textContent = state.selectedBlock
-        ? 'No swimmers for this time block.'
-        : 'No swimmers match the current filters.'
+      const hasRoster = Array.isArray(state.rosterEntries) && state.rosterEntries.length > 0
+      const hasClasses = Array.isArray(state.classInstances) && state.classInstances.length > 0
+      const hasSelectedClass = !state.showAllTimes && !!state.selectedClassKey
+
+      rosterEmpty.textContent = (!hasRoster && !hasClasses)
+        ? 'No roster uploaded for this location/date.'
+        : (hasSelectedClass ? 'No swimmers in this class.' : 'No swimmers match the current filters.')
       rosterEmpty.classList.remove('hidden')
     }
     return
@@ -2435,20 +2716,25 @@ async function updateAttendance(rosterEntryId, attendance) {
 }
 
 async function bulkAttendance(attendance) {
-  if (!state.selectedBlock) return
+  if (!state.selectedClassKey || state.showAllTimes) return
+  const cls = getSelectedClassInstance()
+  const startTime = cls?.start_time || null
+  const className = cls?.class_name || null
+  if (!startTime) return
   try {
     await apiFetch('/attendance/bulk', {
       method: 'POST',
       body: JSON.stringify({
         locationId: state.locationId,
         date: state.date,
-        start_time: state.selectedBlock,
+        start_time: normalizeTimeKey(startTime),
+        class_name: className,
         attendance
       })
     })
     const rosterEntries = Array.isArray(state.rosterEntries) ? state.rosterEntries : []
     rosterEntries.forEach((entry) => {
-      if (entry.start_time === state.selectedBlock) entry.attendance = attendance
+      if (entry.class_key === state.selectedClassKey) entry.attendance = attendance
     })
     applyFilters()
   } catch (err) {
@@ -3038,11 +3324,15 @@ function addLocalSwimmer() {
     addSwimmerStatus.textContent = 'Swimmer name is required.'
     return
   }
+  const selectedCls = (!state.showAllTimes && state.selectedClassKey) ? getSelectedClassInstance() : null
+  const selectedStart = selectedCls?.start_time ? normalizeTimeKey(selectedCls.start_time) : null
   const entry = {
     id: `local_${Date.now()}`,
     location_id: state.locationId,
     class_date: state.date,
-    start_time: state.selectedBlock || null,
+    start_time: selectedStart,
+    class_name: selectedCls?.class_name || null,
+    class_key: state.showAllTimes ? null : (state.selectedClassKey || null),
     swimmer_name: name,
     age_text: addSwimmerAge.value || null,
     program: addSwimmerProgram.value || null,
@@ -3987,7 +4277,7 @@ locationSelect?.addEventListener('change', () => {
   state.locationId = locationSelect.value
   if (state.locationId) localStorage.setItem(locationPrefKey, state.locationId)
   state.manualOverride = false
-  state.selectedBlock = null
+  state.selectedClassKey = null
   state.showAllTimes = false
   timeBlocksExpanded = false
   if (timeBlocks) timeBlocks.classList.add('hidden')
@@ -4040,7 +4330,7 @@ locationSelect?.addEventListener('change', () => {
 dateSelect?.addEventListener('change', () => {
   state.date = dateSelect.value
   state.manualOverride = false
-  state.selectedBlock = null
+  state.selectedClassKey = null
   state.showAllTimes = false
   timeBlocksExpanded = false
   if (timeBlocks) timeBlocks.classList.add('hidden')
@@ -4083,13 +4373,19 @@ announcerSpeakBtn?.addEventListener('click', async () => {
     announcerStatus.textContent = 'Type a message first.'
     return
   }
+  const cls = state.showAllTimes ? null : getSelectedClassInstance()
+  const time = state.showAllTimes ? null : (cls?.start_time ? normalizeTimeKey(cls.start_time) : null)
+  if (!state.showAllTimes && !time) {
+    announcerStatus.textContent = 'Select a time first.'
+    return
+  }
   announcerStatus.textContent = 'Sending…'
   try {
     await apiFetch('/announcer/speak', {
       method: 'POST',
       body: JSON.stringify({
         locationId: state.locationId,
-        time: state.selectedBlock,
+        time,
         text
       })
     })
