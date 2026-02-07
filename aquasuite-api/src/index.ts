@@ -2514,8 +2514,12 @@ app.get('/reports/retention', async (req, reply) => {
     if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
   }
 
-  const params: any[] = locationId === 'all' ? [] : [locationId]
-  let where = locationId === 'all' ? `WHERE 1=1` : `WHERE rs.location_id=$1`
+  const params: any[] = []
+  let where = `WHERE 1=1`
+  if (locationId !== 'all') {
+    params.push(locationId)
+    where += ` AND rs.location_id=$${params.length}`
+  }
   if (start) {
     params.push(start)
     where += ` AND rs.report_date >= $${params.length}`
@@ -2525,13 +2529,23 @@ app.get('/reports/retention', async (req, reply) => {
     where += ` AND rs.report_date <= $${params.length}`
   }
 
+  const latest = await pool.query(
+    `SELECT DISTINCT ON (rs.location_id) rs.id
+       FROM retention_snapshots rs
+       ${where}
+       ORDER BY rs.location_id, rs.report_date DESC, rs.id DESC`,
+    params
+  )
+  const snapshotIds = latest.rows.map((r) => r.id)
+  if (!snapshotIds.length) return reply.send({ rows: [] })
+
   const rows = await pool.query(
     `SELECT rs.report_date::text as report_date, rr.instructor_name, rr.booked, rr.retained, rr.percent_this_cycle, rr.percent_change
      FROM retention_snapshots rs
      JOIN retention_rows rr ON rr.snapshot_id=rs.id
-     ${where}
-     ORDER BY rs.report_date DESC`,
-    params
+     WHERE rs.id = ANY($1::uuid[])
+     ORDER BY rs.report_date DESC, rr.instructor_name`,
+    [snapshotIds]
   )
 
   return reply.send({ rows: rows.rows })
@@ -2557,8 +2571,12 @@ app.get('/reports/aged-accounts', async (req, reply) => {
     if (!hasAccess) return reply.code(403).send({ error: 'no_access_to_location' })
   }
 
-  const params: any[] = locationId === 'all' ? [] : [locationId]
-  let where = locationId === 'all' ? `WHERE 1=1` : `WHERE a.location_id=$1`
+  const params: any[] = []
+  let where = `WHERE 1=1`
+  if (locationId !== 'all') {
+    params.push(locationId)
+    where += ` AND a.location_id=$${params.length}`
+  }
   if (start) {
     params.push(start)
     where += ` AND a.report_date >= $${params.length}`
@@ -2568,13 +2586,23 @@ app.get('/reports/aged-accounts', async (req, reply) => {
     where += ` AND a.report_date <= $${params.length}`
   }
 
+  const latest = await pool.query(
+    `SELECT DISTINCT ON (a.location_id) a.id
+       FROM aged_accounts_snapshots a
+       ${where}
+       ORDER BY a.location_id, a.report_date DESC, a.id DESC`,
+    params
+  )
+  const snapshotIds = latest.rows.map((r) => r.id)
+  if (!snapshotIds.length) return reply.send({ rows: [] })
+
   const rows = await pool.query(
     `SELECT a.report_date::text as report_date, r.bucket, r.amount, r.total
      FROM aged_accounts_snapshots a
      JOIN aged_accounts_rows r ON r.snapshot_id=a.id
-     ${where}
-     ORDER BY a.report_date DESC`,
-    params
+     WHERE a.id = ANY($1::uuid[])
+     ORDER BY a.report_date DESC, r.bucket`,
+    [snapshotIds]
   )
   return reply.send({ rows: rows.rows })
 })
@@ -2754,9 +2782,16 @@ app.get('/reports/enrollment-tracker', async (req, reply) => {
      LIMIT 200`,
     leadParams
   )
-  const workQueue = leadsRaw.rows.filter((row) => {
-    const key = String(row.full_name || '').toLowerCase()
-    return key && !enrolledNames.has(key)
+  const workQueue: any[] = []
+  const seenQueue = new Set<string>()
+  leadsRaw.rows.forEach((row) => {
+    const keyName = String(row.full_name || '').toLowerCase()
+    const keyEmail = String(row.email || '').toLowerCase()
+    const keyPhone = String(row.phone || '').replace(/\D/g, '')
+    const dedupeKey = `${keyName}|${keyEmail}|${keyPhone}`
+    if (!keyName || enrolledNames.has(keyName) || seenQueue.has(dedupeKey)) return
+    seenQueue.add(dedupeKey)
+    workQueue.push(row)
   })
 
   return reply.send({

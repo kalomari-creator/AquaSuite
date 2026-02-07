@@ -3011,7 +3011,7 @@ function ensureReportDates() {
   if (!reportStartDate.value || !reportEndDate.value) {
     const end = state.date ? new Date(state.date) : new Date()
     const start = new Date(end)
-    start.setDate(end.getDate() - 120)
+    start.setDate(end.getDate() - 30)
     reportStartDate.value = formatDateInputValue(start)
     reportEndDate.value = formatDateInputValue(end)
   }
