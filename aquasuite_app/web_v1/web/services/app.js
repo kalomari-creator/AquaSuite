@@ -2624,7 +2624,9 @@ function ensureActivityDefaultDates() {
   if (!activityFrom || !activityTo) return
   if (!activityFrom.value && !activityTo.value) {
     const now = new Date()
-    activityFrom.value = formatDateInputValue(now)
+    const start = new Date(now)
+    start.setDate(start.getDate() - 7)
+    activityFrom.value = formatDateInputValue(start)
     activityTo.value = formatDateInputValue(now)
   }
 }

@@ -11,7 +11,8 @@
     "staff:import": "tsx scripts/import_staff_csv.ts",
     "clients:import": "tsx scripts/import_clients_csv.ts",
     "gmail:poller": "tsx src/workers/gmail_intake_poller.ts",
-    "reports:import": "tsx scripts/import_reports_folder.ts"
+    "reports:import": "tsx scripts/import_reports_folder.ts",
+    "test": "tsx test/regressions.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^9.0.0",
