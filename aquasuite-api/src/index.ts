@@ -1850,6 +1850,8 @@ app.post('/reports/preflight', async (req, reply) => {
   const body = req.body as any
   const locationId = query?.locationId || body?.locationId
   const reportTypeHint = query?.reportType || body?.reportType || null
+  const modeRaw = query?.mode || body?.mode
+  const mode = modeRaw === 'replace' ? 'replace' : 'merge'
 
   if (!locationId) return reply.code(400).send({ error: 'locationId_required' })
 
@@ -1910,9 +1912,97 @@ app.post('/reports/preflight', async (req, reply) => {
 
   if (preflight.reportType === 'unknown') preflight.reportType = null
   if (!preflight.reportType && reportTypeHint) preflight.reportType = reportTypeHint
+  const resolvedReportType = preflight.reportType || reportTypeHint || null
+
+  // Determine whether this upload would collide with existing data for the same location/date-range.
+  const dateRange = preflight.dateRanges?.[0] || {}
+  let detectedStart = parseUsDate(dateRange.start || null)
+  let detectedEnd = parseUsDate(dateRange.end || null)
+  if (detectedStart && detectedEnd && detectedEnd < detectedStart) {
+    const swap = detectedStart
+    detectedStart = detectedEnd
+    detectedEnd = swap
+  }
+  const rangeStart = detectedStart || detectedEnd
+  const rangeEnd = detectedEnd || detectedStart
+
+  const existing: any = { hasExistingData: false, counts: {} as Record<string, number> }
+  try {
+    if (resolvedReportType && rangeStart && rangeEnd) {
+      if (resolvedReportType === 'acne') {
+        const res = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM acne_leads
+           WHERE location_id=$1 AND lead_date BETWEEN $2 AND $3`,
+          [locationId, rangeStart, rangeEnd]
+        )
+        existing.counts.acneLeads = res.rows[0]?.count || 0
+      }
+      if (resolvedReportType === 'new_enrollments') {
+        const res = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM enrollment_events
+           WHERE location_id=$1 AND event_date BETWEEN $2 AND $3`,
+          [locationId, rangeStart, rangeEnd]
+        )
+        existing.counts.enrollments = res.rows[0]?.count || 0
+      }
+      if (resolvedReportType === 'drop_list') {
+        const res = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM drop_events
+           WHERE location_id=$1 AND drop_date BETWEEN $2 AND $3`,
+          [locationId, rangeStart, rangeEnd]
+        )
+        existing.counts.dropEvents = res.rows[0]?.count || 0
+      }
+      if (resolvedReportType === 'aged_accounts') {
+        const reportDate = rangeEnd || rangeStart
+        const snapRes = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM aged_accounts_snapshots
+           WHERE location_id=$1 AND report_date=$2`,
+          [locationId, reportDate]
+        )
+        existing.counts.agedSnapshots = snapRes.rows[0]?.count || 0
+        const rowsRes = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM aged_accounts_rows r
+           JOIN aged_accounts_snapshots s ON s.id=r.snapshot_id
+           WHERE s.location_id=$1 AND s.report_date=$2`,
+          [locationId, reportDate]
+        )
+        existing.counts.agedRows = rowsRes.rows[0]?.count || 0
+      }
+      if (resolvedReportType === 'instructor_retention') {
+        const reportDate = rangeEnd || rangeStart
+        const snapRes = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM retention_snapshots
+           WHERE location_id=$1 AND report_date=$2`,
+          [locationId, reportDate]
+        )
+        existing.counts.retentionSnapshots = snapRes.rows[0]?.count || 0
+        const rowsRes = await pool.query(
+          `SELECT COUNT(*)::int as count
+           FROM instructor_retention_snapshots
+           WHERE location_id=$1 AND as_of_start IS NOT DISTINCT FROM $2 AND as_of_end IS NOT DISTINCT FROM $3`,
+          [locationId, detectedStart, detectedEnd]
+        )
+        existing.counts.retentionRows = rowsRes.rows[0]?.count || 0
+      }
+
+      existing.hasExistingData = Object.values(existing.counts || {}).some((v) => (v || 0) > 0)
+    }
+  } catch (err) {
+    // Preflight should never fail login/bootstrap; just omit existing-data detection.
+    existing.hasExistingData = false
+    existing.counts = {}
+  }
   return reply.send({
     ok: true,
     reportTitle,
+    existing,
     ...preflight
   })
 })
@@ -2008,9 +2098,12 @@ app.post('/reports/upload', async (req, reply) => {
     detectedEnd = swap
     rangeSwapped = true
   }
+  const rangeStart = detectedStart || detectedEnd
+  const rangeEnd = detectedEnd || detectedStart
 
   const parseWarnings = [...(preflight.warnings || [])]
   if (rangeSwapped) parseWarnings.push('date_range_swapped')
+  parseWarnings.push(`mode_${mode}`)
 
   const uploadRes = await pool.query(
     `INSERT INTO report_uploads
@@ -2058,18 +2151,44 @@ app.post('/reports/upload', async (req, reply) => {
   if (resolvedReportType === 'instructor_retention') {
     const rows = extractInstructorRetention(html)
     parsedCount = rows.length
-    insertedCount = rows.length
     if (!rows.length) parseWarnings.push('no_rows_parsed')
     const asOfStart = detectedStart
     const asOfEnd = detectedEnd
 
-    const snapshotRes = await pool.query(
-      `INSERT INTO retention_snapshots (location_id, report_date, source_upload_id)
-       VALUES ($1,$2,$3)
-       RETURNING id`,
-      [locationId, asOfEnd || asOfStart, uploadLogId]
-    )
-    const snapshotId = snapshotRes.rows[0]?.id
+    if (mode === 'replace') {
+      await pool.query(
+        `DELETE FROM instructor_retention_snapshots
+         WHERE location_id=$1 AND as_of_start IS NOT DISTINCT FROM $2 AND as_of_end IS NOT DISTINCT FROM $3`,
+        [locationId, asOfStart, asOfEnd]
+      )
+    }
+
+    const reportDate = rangeEnd || rangeStart
+    let snapshotId: string | null = null
+    if (reportDate) {
+      const existingSnap = await pool.query(
+        `SELECT id FROM retention_snapshots WHERE location_id=$1 AND report_date=$2 ORDER BY created_at DESC LIMIT 1`,
+        [locationId, reportDate]
+      )
+      if (existingSnap.rowCount) {
+        snapshotId = existingSnap.rows[0]?.id || null
+        if (snapshotId) {
+          await pool.query(`UPDATE retention_snapshots SET source_upload_id=$1 WHERE id=$2`, [uploadLogId, snapshotId])
+        }
+      } else {
+        const snapshotRes = await pool.query(
+          `INSERT INTO retention_snapshots (location_id, report_date, source_upload_id)
+           VALUES ($1,$2,$3)
+           RETURNING id`,
+          [locationId, reportDate, uploadLogId]
+        )
+        snapshotId = snapshotRes.rows[0]?.id || null
+      }
+      if (snapshotId) {
+        // Rebuild per-snapshot rows to avoid duplication on re-upload.
+        await pool.query(`DELETE FROM retention_rows WHERE snapshot_id=$1`, [snapshotId])
+      }
+    }
 
     for (const row of rows) {
       const staffId = await upsertStaffDirectory(locationId, row.instructorName, null)
@@ -2113,94 +2232,153 @@ app.post('/reports/upload', async (req, reply) => {
         )
       }
     }
+    insertedCount = rows.length
   } else if (resolvedReportType === 'aged_accounts') {
     const result = extractAgedAccounts(html)
     parsedCount = result.rows.length
-    insertedCount = result.rows.length
     parseWarnings.push(...result.warnings)
     if (!result.rows.length) parseWarnings.push('no_rows_parsed')
 
-    const snapshotRes = await pool.query(
-      `INSERT INTO aged_accounts_snapshots (location_id, report_date, source_upload_id)
-       VALUES ($1,$2,$3)
-       RETURNING id`,
-      [locationId, detectedEnd || detectedStart, uploadLogId]
-    )
-    const snapshotId = snapshotRes.rows[0]?.id
-
-    for (const row of result.rows) {
-      await pool.query(
-        `INSERT INTO aged_accounts_rows (snapshot_id, bucket, amount, total)
-         VALUES ($1,$2,$3,$4)`,
-        [snapshotId, row.bucket, row.amount, row.total]
+    const reportDate = rangeEnd || rangeStart
+    let snapshotId: string | null = null
+    if (reportDate) {
+      const existingSnap = await pool.query(
+        `SELECT id FROM aged_accounts_snapshots WHERE location_id=$1 AND report_date=$2 ORDER BY created_at DESC LIMIT 1`,
+        [locationId, reportDate]
       )
+      if (existingSnap.rowCount) {
+        snapshotId = existingSnap.rows[0]?.id || null
+        if (snapshotId) {
+          await pool.query(`UPDATE aged_accounts_snapshots SET source_upload_id=$1 WHERE id=$2`, [uploadLogId, snapshotId])
+        }
+      } else {
+        const snapshotRes = await pool.query(
+          `INSERT INTO aged_accounts_snapshots (location_id, report_date, source_upload_id)
+           VALUES ($1,$2,$3)
+           RETURNING id`,
+          [locationId, reportDate, uploadLogId]
+        )
+        snapshotId = snapshotRes.rows[0]?.id || null
+      }
     }
+
+    if (snapshotId) {
+      if (mode === 'replace') {
+        await pool.query(`DELETE FROM aged_accounts_rows WHERE snapshot_id=$1`, [snapshotId])
+        for (const row of result.rows) {
+          await pool.query(
+            `INSERT INTO aged_accounts_rows (snapshot_id, bucket, amount, total)
+             VALUES ($1,$2,$3,$4)`,
+            [snapshotId, row.bucket, row.amount, row.total]
+          )
+        }
+      } else {
+        for (const row of result.rows) {
+          const upd = await pool.query(
+            `UPDATE aged_accounts_rows SET amount=$3, total=$4
+             WHERE snapshot_id=$1 AND lower(COALESCE(bucket,''))=lower(COALESCE($2,''))`,
+            [snapshotId, row.bucket, row.amount, row.total]
+          )
+          if (!upd.rowCount) {
+            await pool.query(
+              `INSERT INTO aged_accounts_rows (snapshot_id, bucket, amount, total)
+               VALUES ($1,$2,$3,$4)`,
+              [snapshotId, row.bucket, row.amount, row.total]
+            )
+          }
+        }
+      }
+    } else {
+      parseWarnings.push('missing_report_date')
+    }
+    insertedCount = result.rows.length
   } else if (resolvedReportType === 'drop_list') {
     const result = extractDropList(html)
     parsedCount = result.rows.length
-    insertedCount = result.rows.length
     parseWarnings.push(...result.warnings)
     if (!result.rows.length) parseWarnings.push('no_rows_parsed')
 
-    if (detectedStart || detectedEnd) {
-      await pool.query(
-        `DELETE FROM drop_events WHERE location_id=$1 AND drop_date BETWEEN $2 AND $3`,
-        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
-      )
+    if (mode === 'replace') {
+      const dates = result.rows.map((r) => r.dropDate).filter(Boolean).sort()
+      const delStart = dates[0] || rangeStart
+      const delEnd = dates[dates.length - 1] || rangeEnd
+      if (delStart && delEnd) {
+        await pool.query(
+          `DELETE FROM drop_events WHERE location_id=$1 AND drop_date BETWEEN $2 AND $3`,
+          [locationId, delStart, delEnd]
+        )
+      }
     }
 
+    insertedCount = 0
+    const dropConflict = ' ON CONFLICT DO NOTHING'
     for (const row of result.rows) {
-      const dropDate = row.dropDate || detectedEnd || detectedStart
-      await pool.query(
+      const dropDate = row.dropDate || rangeEnd || rangeStart
+      const ins = await pool.query(
         `INSERT INTO drop_events (location_id, drop_date, swimmer_name, reason, source_upload_id)
-         VALUES ($1,$2,$3,$4,$5)`,
+         VALUES ($1,$2,$3,$4,$5)${dropConflict}`,
         [locationId, dropDate, row.swimmerName, row.reason, uploadLogId]
       )
+      insertedCount += ins.rowCount || 0
     }
   } else if (resolvedReportType === 'new_enrollments') {
     const result = extractEnrollmentEvents(html)
     parsedCount = result.rows.length
-    insertedCount = result.rows.length
     parseWarnings.push(...result.warnings)
     if (!result.rows.length) parseWarnings.push('no_rows_parsed')
 
-    if (detectedStart || detectedEnd) {
-      await pool.query(
-        `DELETE FROM enrollment_events WHERE location_id=$1 AND event_date BETWEEN $2 AND $3`,
-        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
-      )
+    if (mode === 'replace') {
+      const dates = result.rows.map((r) => r.eventDate).filter(Boolean).sort()
+      const delStart = dates[0] || rangeStart
+      const delEnd = dates[dates.length - 1] || rangeEnd
+      if (delStart && delEnd) {
+        await pool.query(
+          `DELETE FROM enrollment_events WHERE location_id=$1 AND event_date BETWEEN $2 AND $3`,
+          [locationId, delStart, delEnd]
+        )
+      }
     }
 
+    insertedCount = 0
+    const enrollmentConflict = ' ON CONFLICT DO NOTHING'
     for (const row of result.rows) {
-      const eventDate = row.eventDate || detectedEnd || detectedStart
-      await pool.query(
+      const eventDate = row.eventDate || rangeEnd || rangeStart
+      const ins = await pool.query(
         `INSERT INTO enrollment_events (location_id, event_date, swimmer_name, source_upload_id)
-         VALUES ($1,$2,$3,$4)`,
+         VALUES ($1,$2,$3,$4)${enrollmentConflict}`,
         [locationId, eventDate, row.swimmerName, uploadLogId]
       )
+      insertedCount += ins.rowCount || 0
       await upsertContactFromLead(locationId, 'enrollment', row.swimmerName, null, null)
     }
   } else if (resolvedReportType === 'acne') {
     const result = extractAcneLeads(html)
     parsedCount = result.rows.length
-    insertedCount = result.rows.length
     parseWarnings.push(...result.warnings)
     if (!result.rows.length) parseWarnings.push('no_rows_parsed')
 
-    if (detectedStart || detectedEnd) {
-      await pool.query(
-        `DELETE FROM acne_leads WHERE location_id=$1 AND lead_date BETWEEN $2 AND $3`,
-        [locationId, detectedStart || detectedEnd, detectedEnd || detectedStart]
-      )
+    if (mode === 'replace') {
+      const dates = result.rows.map((r) => r.leadDate).filter(Boolean).sort()
+      const delStart = dates[0] || rangeStart
+      const delEnd = dates[dates.length - 1] || rangeEnd
+      if (delStart && delEnd) {
+        await pool.query(
+          `DELETE FROM acne_leads WHERE location_id=$1 AND lead_date BETWEEN $2 AND $3`,
+          [locationId, delStart, delEnd]
+        )
+      }
     }
 
+    insertedCount = 0
+    const acneConflict = ' ON CONFLICT DO NOTHING'
     for (const row of result.rows) {
-      const leadDate = row.leadDate || detectedEnd || detectedStart
-      await pool.query(
+      const leadDate = row.leadDate || rangeEnd || rangeStart
+      const ins = await pool.query(
         `INSERT INTO acne_leads (location_id, lead_date, full_name, email, phone, source_upload_id)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
+         VALUES ($1,$2,$3,$4,$5,$6)${acneConflict}`,
         [locationId, leadDate, row.fullName, row.email, row.phone, uploadLogId]
       )
+      insertedCount += ins.rowCount || 0
       await upsertContactFromLead(locationId, 'acne', row.fullName, row.email, row.phone)
     }
   }

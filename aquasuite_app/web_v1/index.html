@@ -987,6 +987,14 @@
         <button class="secondary miniBtn" id="reportConfirmClose">Close</button>
       </div>
       <div class="hint" id="reportConfirmSummary"></div>
+      <div class="hint hidden" id="reportConfirmExisting"></div>
+      <label class="tiny hidden" id="reportUploadModeRow" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+        Mode
+        <select id="reportUploadMode">
+          <option value="merge">Merge (recommended)</option>
+          <option value="replace">Replace existing data</option>
+        </select>
+      </label>
       <label class="tiny" style="display:flex;align-items:center;gap:6px;margin-top:8px;">
         <input type="checkbox" id="reportConfirmCheckbox" />
         Confirm location + report type are correct.

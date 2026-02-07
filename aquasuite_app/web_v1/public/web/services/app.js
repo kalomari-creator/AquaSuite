@@ -165,6 +165,9 @@ const uploadMergeMode = el('uploadMergeMode')
 const uploadHistoryList = el('uploadHistoryList')
 const reportConfirmModal = el('reportConfirmModal')
 const reportConfirmSummary = el('reportConfirmSummary')
+const reportConfirmExisting = el('reportConfirmExisting')
+const reportUploadModeRow = el('reportUploadModeRow')
+const reportUploadMode = el('reportUploadMode')
 const reportConfirmCheckbox = el('reportConfirmCheckbox')
 const reportConfirmRun = el('reportConfirmRun')
 const reportConfirmClose = el('reportConfirmClose')
@@ -2927,6 +2930,13 @@ function setReportUploadStatus(type, message) {
   if (status) status.textContent = message || ''
 }
 
+function resetReportUploadFile(type) {
+  const { fileInput } = getReportUploadElements(type)
+  if (fileInput) fileInput.value = ''
+  reportPreflightCache[type] = null
+  renderReportUploadSummary(type, null)
+}
+
 function renderReportUploadSummary(type, data) {
   const { summary } = getReportUploadElements(type)
   if (!summary) return
@@ -2996,6 +3006,27 @@ async function openReportConfirm(type) {
   if (cached.data?.reportType && cached.data.reportType !== type) {
     reportConfirmSummary.textContent += `\nWarning: detected type ${cached.data.reportType}`
   }
+  const existing = cached.data?.existing
+  if (existing?.hasExistingData) {
+    const counts = existing?.counts && typeof existing.counts === 'object'
+      ? Object.entries(existing.counts).map(([k, v]) => `${k}: ${v}`).join(', ')
+      : ''
+    const message = counts
+      ? `Existing data detected (${counts}). Choose Merge or Replace.`
+      : 'Existing data detected for this location/date range. Choose Merge or Replace.'
+    if (reportConfirmExisting) {
+      reportConfirmExisting.textContent = message
+      reportConfirmExisting.classList.remove('hidden')
+    }
+    if (reportUploadModeRow) reportUploadModeRow.classList.remove('hidden')
+  } else {
+    if (reportConfirmExisting) {
+      reportConfirmExisting.textContent = ''
+      reportConfirmExisting.classList.add('hidden')
+    }
+    if (reportUploadModeRow) reportUploadModeRow.classList.add('hidden')
+  }
+  if (reportUploadMode) reportUploadMode.value = 'merge'
   if (reportConfirmCheckbox) reportConfirmCheckbox.checked = false
   reportConfirmRun.disabled = true
   if (reportConfirmStatus) reportConfirmStatus.textContent = ''
@@ -3012,23 +3043,27 @@ function closeReportConfirm() {
 
 async function runReportConfirm() {
   if (!pendingReportUpload) return
+  const uploadType = pendingReportUpload.type
   if (!reportConfirmCheckbox?.checked) {
     if (reportConfirmStatus) reportConfirmStatus.textContent = 'Please confirm before uploading.'
     return
   }
+  const mode = reportUploadMode?.value === 'replace' ? 'replace' : 'merge'
   if (reportConfirmStatus) reportConfirmStatus.textContent = 'Uploading...'
   try {
     const formData = new FormData()
     formData.append('file', pendingReportUpload.file)
-    await apiFetch(`/reports/upload?locationId=${state.locationId}&reportType=${encodeURIComponent(pendingReportUpload.type)}`, {
+    await apiFetch(`/reports/upload?locationId=${state.locationId}&reportType=${encodeURIComponent(uploadType)}&mode=${mode}`, {
       method: 'POST',
       body: formData
     })
-    setReportUploadStatus(pendingReportUpload.type, 'Report uploaded.')
+    setReportUploadStatus(uploadType, 'Report uploaded.')
     closeReportConfirm()
     loadUploads()
   } catch (err) {
     if (reportConfirmStatus) reportConfirmStatus.textContent = err?.code || err?.error || 'Report upload failed'
+  } finally {
+    resetReportUploadFile(uploadType)
   }
 }
 
@@ -4707,14 +4742,15 @@ async function runUploadConfirm() {
       body: formData
     })
     setUploadStatus(`Upload complete. Classes: ${data.classesInserted}, Swimmers: ${data.swimmersInserted}`)
-    if (rosterFile) rosterFile.value = ''
-    if (uploadRosterFile) uploadRosterFile.value = ''
-    if (enrollmentRosterFile) enrollmentRosterFile.value = ''
     await loadUploads()
     await loadRosterEntries()
     closeUploadConfirm()
   } catch (err) {
     setUploadStatus(err?.error || 'Upload failed')
+  } finally {
+    if (rosterFile) rosterFile.value = ''
+    if (uploadRosterFile) uploadRosterFile.value = ''
+    if (enrollmentRosterFile) enrollmentRosterFile.value = ''
   }
 }
 
